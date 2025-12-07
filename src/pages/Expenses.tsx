@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ExpenseItem } from '@/components/dashboard/ExpenseItem';
 import { AddExpenseDialog } from '@/components/expenses/AddExpenseDialog';
@@ -6,27 +6,125 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { mockExpenses, mockGroups, expenseCategories } from '@/data/mockData';
+import { expenseCategories } from '@/data/mockData';
 import { formatCurrency } from '@/lib/format';
-import { Search, Filter, Receipt, TrendingUp, Calendar } from 'lucide-react';
+import { expensesApi, groupsApi } from '@/lib/api';
+import { useToast } from '@/hooks/use-toast';
+import { ApiError } from '@/lib/api';
+import { Search, Filter, Receipt, TrendingUp, Calendar, Loader2 } from 'lucide-react';
+
+interface Expense {
+  id: string;
+  groupId: string | { id: string; name: string; _id?: string };
+  description: string;
+  amount: number;
+  paidBy: { id: string; name: string; email: string; avatar?: string };
+  category: string;
+  date: Date;
+  createdAt: Date;
+  paymentMethod: string;
+  isFlagged?: boolean;
+  isRecurring?: boolean;
+  paidTo?: string;
+  splitType?: string;
+  splits?: any[];
+}
+
+interface Group {
+  id: string;
+  name: string;
+}
 
 const Expenses = () => {
+  const { toast } = useToast();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedGroup, setSelectedGroup] = useState<string>('all');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
+  const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [groups, setGroups] = useState<Group[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadingGroups, setLoadingGroups] = useState(true);
 
-  const filteredExpenses = mockExpenses.filter(expense => {
+  useEffect(() => {
+    fetchExpenses();
+    fetchGroups();
+  }, []);
+
+  const fetchExpenses = async () => {
+    setLoading(true);
+    try {
+      const data = await expensesApi.getAll();
+      // Transform the data to match the expected format
+      const transformedExpenses = data.map((exp: any) => ({
+        id: exp.id || exp._id,
+        groupId: typeof exp.groupId === 'object' ? exp.groupId.id || exp.groupId._id : exp.groupId,
+        description: exp.description,
+        amount: exp.amount,
+        paidBy: typeof exp.paidBy === 'object' 
+          ? { 
+              id: exp.paidBy.id || exp.paidBy._id, 
+              name: exp.paidBy.name || 'Unknown',
+              email: exp.paidBy.email || '',
+              avatar: exp.paidBy.avatar 
+            }
+          : { id: exp.paidBy, name: 'Unknown', email: '' },
+        category: exp.category,
+        date: exp.date ? new Date(exp.date) : (exp.createdAt ? new Date(exp.createdAt) : new Date()),
+        createdAt: exp.createdAt ? new Date(exp.createdAt) : new Date(),
+        paymentMethod: exp.paymentMethod || 'cash',
+        isFlagged: exp.isFlagged || false,
+        isRecurring: exp.isRecurring || false,
+        paidTo: exp.paidTo,
+        splitType: exp.splitType,
+        splits: exp.splits || [],
+      }));
+      setExpenses(transformedExpenses);
+    } catch (error) {
+      console.error('Error fetching expenses:', error);
+      toast({
+        title: 'Error',
+        description: error instanceof ApiError ? error.message : 'Failed to load expenses',
+        variant: 'destructive',
+      });
+      setExpenses([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchGroups = async () => {
+    setLoadingGroups(true);
+    try {
+      const data = await groupsApi.getAll();
+      setGroups(data || []);
+    } catch (error) {
+      console.error('Error fetching groups:', error);
+      setGroups([]);
+    } finally {
+      setLoadingGroups(false);
+    }
+  };
+
+  const handleExpenseAdded = () => {
+    fetchExpenses();
+  };
+
+  const filteredExpenses = expenses.filter(expense => {
     const matchesSearch = expense.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
       expense.paidBy.name.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesGroup = selectedGroup === 'all' || expense.groupId === selectedGroup;
+    const expenseGroupId = typeof expense.groupId === 'string' 
+      ? expense.groupId 
+      : (expense.groupId.id || expense.groupId._id || '');
+    const matchesGroup = selectedGroup === 'all' || expenseGroupId === selectedGroup;
     const matchesCategory = selectedCategory === 'all' || expense.category === selectedCategory;
     return matchesSearch && matchesGroup && matchesCategory;
   });
 
   const totalAmount = filteredExpenses.reduce((sum, e) => sum + e.amount, 0);
   const thisMonthExpenses = filteredExpenses.filter(e => {
+    const expenseDate = new Date(e.date);
     const now = new Date();
-    return e.date.getMonth() === now.getMonth() && e.date.getFullYear() === now.getFullYear();
+    return expenseDate.getMonth() === now.getMonth() && expenseDate.getFullYear() === now.getFullYear();
   });
   const thisMonthTotal = thisMonthExpenses.reduce((sum, e) => sum + e.amount, 0);
 
@@ -39,7 +137,7 @@ const Expenses = () => {
             <h1 className="text-3xl font-bold text-foreground">Expenses</h1>
             <p className="text-muted-foreground mt-1">Track and manage all expenses</p>
           </div>
-          <AddExpenseDialog />
+          <AddExpenseDialog onExpenseAdded={handleExpenseAdded} />
         </div>
 
         {/* Stats */}
@@ -96,9 +194,13 @@ const Expenses = () => {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Groups</SelectItem>
-              {mockGroups.map(group => (
-                <SelectItem key={group.id} value={group.id}>{group.name}</SelectItem>
-              ))}
+              {loadingGroups ? (
+                <SelectItem value="loading" disabled>Loading groups...</SelectItem>
+              ) : (
+                groups.map(group => (
+                  <SelectItem key={group.id} value={group.id}>{group.name}</SelectItem>
+                ))
+              )}
             </SelectContent>
           </Select>
           <Select value={selectedCategory} onValueChange={setSelectedCategory}>
@@ -116,17 +218,33 @@ const Expenses = () => {
 
         {/* Expense List */}
         <div className="bg-card rounded-2xl border border-border shadow-card overflow-hidden">
-          {filteredExpenses.length > 0 ? (
+          {loading ? (
+            <div className="flex items-center justify-center py-16">
+              <div className="flex flex-col items-center gap-4">
+                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                <p className="text-muted-foreground">Loading expenses...</p>
+              </div>
+            </div>
+          ) : filteredExpenses.length > 0 ? (
             <div className="divide-y divide-border">
-              {filteredExpenses.map((expense, index) => (
-                <div key={expense.id} className="p-2">
-                  <ExpenseItem
-                    expense={expense}
-                    showGroup
-                    className={`animate-slide-up border-0 shadow-none hover:shadow-none`}
-                  />
-                </div>
-              ))}
+              {filteredExpenses.map((expense, index) => {
+                // Transform expense to match ExpenseItem's expected type
+                const expenseForItem = {
+                  ...expense,
+                  groupId: typeof expense.groupId === 'string' 
+                    ? expense.groupId 
+                    : (expense.groupId.id || expense.groupId._id || ''),
+                };
+                return (
+                  <div key={expense.id} className="p-2">
+                    <ExpenseItem
+                      expense={expenseForItem as any}
+                      showGroup
+                      className={`animate-slide-up border-0 shadow-none hover:shadow-none`}
+                    />
+                  </div>
+                );
+              })}
             </div>
           ) : (
             <div className="text-center py-16">

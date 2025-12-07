@@ -4,17 +4,127 @@ import { MonthlyTrendChart } from '@/components/charts/MonthlyTrendChart';
 import { MemberContributionChart } from '@/components/charts/MemberContributionChart';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { mockExpenses, mockGroups, mockBalanceSummaries, expenseCategories, categoryColors } from '@/data/mockData';
+import { expenseCategories, categoryColors } from '@/data/mockData';
+import { expensesApi, groupsApi } from '@/lib/api';
+import { useToast } from '@/hooks/use-toast';
+import { ApiError } from '@/lib/api';
 import { formatCurrency, formatPercentage } from '@/lib/format';
-import { Download, FileText, Table2, TrendingUp, PieChart, Users, Calendar } from 'lucide-react';
-import { useState } from 'react';
+import { Download, FileText, Table2, TrendingUp, PieChart, Users, Calendar, Loader2 } from 'lucide-react';
+import { useState, useEffect } from 'react';
+
+interface Expense {
+  id: string;
+  groupId: string | { id: string; name: string };
+  description: string;
+  amount: number;
+  category: string;
+  date: Date;
+  paidBy: { id: string; name: string; email: string; avatar?: string };
+}
+
+interface Group {
+  id: string;
+  name: string;
+}
 
 const Analytics = () => {
+  const { toast } = useToast();
   const [selectedGroup, setSelectedGroup] = useState<string>('all');
   const [dateRange, setDateRange] = useState<string>('all');
+  const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [groups, setGroups] = useState<Group[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadingGroups, setLoadingGroups] = useState(true);
 
-  const filteredExpenses = mockExpenses.filter(expense => {
-    const matchesGroup = selectedGroup === 'all' || expense.groupId === selectedGroup;
+  useEffect(() => {
+    fetchExpenses();
+    fetchGroups();
+  }, []);
+
+  useEffect(() => {
+    fetchExpenses();
+  }, [selectedGroup, dateRange]);
+
+  const fetchExpenses = async () => {
+    setLoading(true);
+    try {
+      const groupId = selectedGroup === 'all' ? undefined : selectedGroup;
+      const data = await expensesApi.getAll(groupId);
+      
+      // Transform and filter by date range
+      let transformedExpenses = data.map((exp: any) => ({
+        id: exp.id || exp._id,
+        groupId: typeof exp.groupId === 'object' 
+          ? { id: exp.groupId.id || exp.groupId._id, name: exp.groupId.name }
+          : exp.groupId,
+        description: exp.description,
+        amount: exp.amount,
+        category: exp.category,
+        date: exp.date ? new Date(exp.date) : (exp.createdAt ? new Date(exp.createdAt) : new Date()),
+        paidBy: typeof exp.paidBy === 'object'
+          ? {
+              id: exp.paidBy.id || exp.paidBy._id,
+              name: exp.paidBy.name || 'Unknown',
+              email: exp.paidBy.email || '',
+              avatar: exp.paidBy.avatar
+            }
+          : { id: exp.paidBy, name: 'Unknown', email: '' },
+      }));
+
+      // Filter by date range
+      if (dateRange !== 'all') {
+        const now = new Date();
+        let startDate: Date;
+        
+        switch (dateRange) {
+          case 'month':
+            startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+            break;
+          case 'quarter':
+            startDate = new Date(now.getFullYear(), now.getMonth() - 2, 1);
+            break;
+          case 'year':
+            startDate = new Date(now.getFullYear(), 0, 1);
+            break;
+          default:
+            startDate = new Date(0);
+        }
+        
+        transformedExpenses = transformedExpenses.filter(e => e.date >= startDate);
+      }
+
+      setExpenses(transformedExpenses);
+    } catch (error) {
+      console.error('Error fetching expenses:', error);
+      toast({
+        title: 'Error',
+        description: error instanceof ApiError ? error.message : 'Failed to load expenses',
+        variant: 'destructive',
+      });
+      setExpenses([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchGroups = async () => {
+    setLoadingGroups(true);
+    try {
+      const data = await groupsApi.getAll();
+      setGroups(data || []);
+    } catch (error) {
+      console.error('Error fetching groups:', error);
+      setGroups([]);
+    } finally {
+      setLoadingGroups(false);
+    }
+  };
+
+  const filteredExpenses = expenses.filter(expense => {
+    const expenseGroupId = typeof expense.groupId === 'string' 
+      ? expense.groupId 
+      : (expense.groupId.id || expense.groupId._id || '');
+    const matchesGroup = selectedGroup === 'all' || expenseGroupId === selectedGroup;
     return matchesGroup;
   });
 
@@ -58,9 +168,13 @@ const Analytics = () => {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Groups</SelectItem>
-              {mockGroups.map(group => (
-                <SelectItem key={group.id} value={group.id}>{group.name}</SelectItem>
-              ))}
+              {loadingGroups ? (
+                <SelectItem value="loading" disabled>Loading groups...</SelectItem>
+              ) : (
+                groups.map(group => (
+                  <SelectItem key={group.id} value={group.id}>{group.name}</SelectItem>
+                ))
+              )}
             </SelectContent>
           </Select>
           <Select value={dateRange} onValueChange={setDateRange}>
@@ -146,7 +260,13 @@ const Analytics = () => {
           {/* Member Contributions */}
           <div className="bg-card rounded-2xl border border-border p-6 shadow-card">
             <h3 className="text-lg font-semibold text-foreground mb-4">Member Contributions</h3>
-            <MemberContributionChart balances={mockBalanceSummaries['1'] || []} />
+            {loading ? (
+              <div className="flex items-center justify-center h-64">
+                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              </div>
+            ) : (
+              <MemberContributionChart balances={[]} />
+            )}
           </div>
 
           {/* Category Breakdown Table */}

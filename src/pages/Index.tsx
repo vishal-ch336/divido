@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { BalanceCard } from '@/components/dashboard/BalanceCard';
 import { StatsCard } from '@/components/dashboard/StatsCard';
@@ -9,25 +10,189 @@ import { CategoryPieChart } from '@/components/charts/CategoryPieChart';
 import { MonthlyTrendChart } from '@/components/charts/MonthlyTrendChart';
 import { AddExpenseDialog } from '@/components/expenses/AddExpenseDialog';
 import { Button } from '@/components/ui/button';
-import { 
-  mockGroups, 
-  mockExpenses, 
-  mockDebts, 
-  mockActivityLogs, 
-  currentUser,
-  mockGroupMembers 
-} from '@/data/mockData';
+import { dashboardApi, activityApi } from '@/lib/api';
+import { useAuth } from '@/hooks/useAuth';
+import { useToast } from '@/hooks/use-toast';
+import { ApiError } from '@/lib/api';
 import { formatCurrency } from '@/lib/format';
-import { Receipt, Users, ArrowLeftRight, Plus, ChevronRight, TrendingUp } from 'lucide-react';
+import { Receipt, Users, ArrowLeftRight, Plus, ChevronRight, TrendingUp, Loader2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { DebtRelation, ActivityLog, Expense, Group } from '@/types';
 
 const Index = () => {
-  // Calculate total balance across all groups
-  const totalOwed = 2400; // You are owed
-  const totalOwe = -5000; // You owe
-  const netBalance = totalOwed + totalOwe;
+  const { user } = useAuth();
+  const { toast } = useToast();
+  const [loading, setLoading] = useState(true);
+  const [dashboardData, setDashboardData] = useState<{
+    totalOwed: number;
+    totalOwe: number;
+    netBalance: number;
+    totalGroups: number;
+    thisMonthExpenses: number;
+    pendingSettlements: number;
+    groups: Group[];
+    recentExpenses: Expense[];
+    debtRelations: DebtRelation[];
+  } | null>(null);
+  const [activities, setActivities] = useState<ActivityLog[]>([]);
+  const [loadingActivities, setLoadingActivities] = useState(true);
 
-  const recentExpenses = mockExpenses.slice(0, 4);
+  useEffect(() => {
+    fetchDashboardData();
+    fetchActivities();
+  }, []);
+
+  const fetchDashboardData = async () => {
+    setLoading(true);
+    try {
+      const data = await dashboardApi.getSummary();
+      
+      // Transform debt relations
+      const debtRelations: DebtRelation[] = (data.debtRelations || []).map((dr: any) => ({
+        fromUser: {
+          id: dr.fromUser.id || dr.fromUser._id,
+          name: dr.fromUser.name || 'Unknown',
+          email: dr.fromUser.email || '',
+          avatar: dr.fromUser.avatar,
+          createdAt: new Date(),
+        },
+        toUser: {
+          id: dr.toUser.id || dr.toUser._id,
+          name: dr.toUser.name || 'Unknown',
+          email: dr.toUser.email || '',
+          avatar: dr.toUser.avatar,
+          createdAt: new Date(),
+        },
+        amount: dr.amount,
+      }));
+
+      // Transform groups
+      const groups: Group[] = (data.groups || []).map((g: any) => ({
+        id: g.id || g._id,
+        name: g.name,
+        description: g.description,
+        createdBy: typeof g.createdBy === 'object' ? g.createdBy.id || g.createdBy._id : g.createdBy,
+        createdAt: g.createdAt ? new Date(g.createdAt) : new Date(),
+        memberCount: g.memberCount || 0,
+        totalExpenses: g.totalExpenses || 0,
+        currency: g.currency || 'INR',
+        userBalance: g.userBalance || 0,
+      }));
+
+      // Transform expenses
+      const recentExpenses: Expense[] = (data.recentExpenses || []).map((exp: any) => ({
+        id: exp.id || exp._id,
+        groupId: typeof exp.groupId === 'object' ? exp.groupId.id || exp.groupId._id : exp.groupId,
+        description: exp.description,
+        amount: exp.amount,
+        paidBy: typeof exp.paidBy === 'object' 
+          ? {
+              id: exp.paidBy.id || exp.paidBy._id,
+              name: exp.paidBy.name || 'Unknown',
+              email: exp.paidBy.email || '',
+              avatar: exp.paidBy.avatar,
+              createdAt: new Date(),
+            }
+          : {
+              id: exp.paidBy,
+              name: 'Unknown',
+              email: '',
+              createdAt: new Date(),
+            },
+        category: exp.category,
+        date: exp.date ? new Date(exp.date) : new Date(),
+        createdAt: exp.createdAt ? new Date(exp.createdAt) : new Date(),
+        paymentMethod: exp.paymentMethod || 'cash',
+        splitType: exp.splitType || 'equal',
+        splits: exp.splits || [],
+        isFlagged: exp.isFlagged || false,
+        isRecurring: exp.isRecurring || false,
+      }));
+
+      setDashboardData({
+        totalOwed: data.totalOwed || 0,
+        totalOwe: data.totalOwe || 0,
+        netBalance: data.netBalance || 0,
+        totalGroups: data.totalGroups || 0,
+        thisMonthExpenses: data.thisMonthExpenses || 0,
+        pendingSettlements: data.pendingSettlements || 0,
+        groups,
+        recentExpenses,
+        debtRelations,
+      });
+    } catch (error) {
+      console.error('Error fetching dashboard data:', error);
+      toast({
+        title: 'Error',
+        description: error instanceof ApiError ? error.message : 'Failed to load dashboard data',
+        variant: 'destructive',
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchActivities = async () => {
+    setLoadingActivities(true);
+    try {
+      const data = await activityApi.getAll();
+      const transformedActivities: ActivityLog[] = (data || []).map((act: any) => ({
+        id: act.id || act._id,
+        groupId: typeof act.groupId === 'object' ? act.groupId.id || act.groupId._id : act.groupId,
+        userId: typeof act.userId === 'object' ? act.userId.id || act.userId._id : act.userId,
+        user: typeof act.user === 'object' 
+          ? {
+              id: act.user.id || act.user._id,
+              name: act.user.name || 'Unknown',
+              email: act.user.email || '',
+              avatar: act.user.avatar,
+              createdAt: new Date(),
+            }
+          : {
+              id: act.userId,
+              name: 'Unknown',
+              email: '',
+              createdAt: new Date(),
+            },
+        action: act.action,
+        description: act.description,
+        metadata: act.metadata,
+        createdAt: act.createdAt ? new Date(act.createdAt) : new Date(),
+      }));
+      setActivities(transformedActivities);
+    } catch (error) {
+      console.error('Error fetching activities:', error);
+      setActivities([]);
+    } finally {
+      setLoadingActivities(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <MainLayout>
+        <div className="flex items-center justify-center py-16">
+          <div className="flex flex-col items-center gap-4">
+            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            <p className="text-muted-foreground">Loading dashboard...</p>
+          </div>
+        </div>
+      </MainLayout>
+    );
+  }
+
+  if (!dashboardData) {
+    return (
+      <MainLayout>
+        <div className="text-center py-16">
+          <p className="text-muted-foreground">Failed to load dashboard data</p>
+        </div>
+      </MainLayout>
+    );
+  }
+
+  const { totalOwed, totalOwe, netBalance, totalGroups, thisMonthExpenses, pendingSettlements, groups, recentExpenses, debtRelations } = dashboardData;
+  const userName = user?.name?.split(' ')[0] || 'User';
 
   return (
     <MainLayout>
@@ -36,7 +201,7 @@ const Index = () => {
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
             <h1 className="text-3xl font-bold text-foreground">Dashboard</h1>
-            <p className="text-muted-foreground mt-1">Welcome back, {currentUser.name.split(' ')[0]}</p>
+            <p className="text-muted-foreground mt-1">Welcome back, {userName}</p>
           </div>
           <AddExpenseDialog />
         </div>
@@ -46,14 +211,14 @@ const Index = () => {
           <BalanceCard
             title="You are owed"
             amount={totalOwed}
-            subtitle="Across 2 groups"
+            subtitle={`Across ${totalGroups} group${totalGroups !== 1 ? 's' : ''}`}
             trend="up"
             className="animate-slide-up"
           />
           <BalanceCard
             title="You owe"
             amount={totalOwe}
-            subtitle="Across 1 group"
+            subtitle={`Across ${totalGroups} group${totalGroups !== 1 ? 's' : ''}`}
             trend="down"
             className="animate-slide-up stagger-1"
           />
@@ -69,7 +234,7 @@ const Index = () => {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <StatsCard
             title="Total Groups"
-            value={mockGroups.length}
+            value={totalGroups}
             subtitle="Active groups"
             icon={Users}
             iconColor="bg-primary/10 text-primary"
@@ -77,7 +242,7 @@ const Index = () => {
           />
           <StatsCard
             title="This Month"
-            value={formatCurrency(28500)}
+            value={formatCurrency(thisMonthExpenses)}
             subtitle="Total expenses"
             icon={Receipt}
             iconColor="bg-accent/10 text-accent"
@@ -85,7 +250,7 @@ const Index = () => {
           />
           <StatsCard
             title="Pending"
-            value={3}
+            value={pendingSettlements}
             subtitle="Settlements"
             icon={ArrowLeftRight}
             iconColor="bg-warning/10 text-warning"
@@ -93,7 +258,7 @@ const Index = () => {
           />
           <StatsCard
             title="Saved"
-            value={formatCurrency(4200)}
+            value={formatCurrency(0)}
             subtitle="This month"
             icon={TrendingUp}
             iconColor="bg-credit/10 text-credit"
@@ -117,17 +282,18 @@ const Index = () => {
                 </Link>
               </div>
               <div className="space-y-3">
-                {mockGroups.slice(0, 3).map((group, index) => {
-                  const memberData = mockGroupMembers[group.id]?.find(m => m.userId === currentUser.id);
-                  return (
+                {groups.length > 0 ? (
+                  groups.map((group, index) => (
                     <GroupCard 
                       key={group.id} 
                       group={group} 
-                      userBalance={memberData?.balance || 0}
+                      userBalance={group.userBalance || 0}
                       className={`animate-slide-up stagger-${index + 1}`}
                     />
-                  );
-                })}
+                  ))
+                ) : (
+                  <p className="text-center text-muted-foreground py-8">No groups yet. Create your first group!</p>
+                )}
               </div>
             </div>
 
@@ -143,13 +309,26 @@ const Index = () => {
                 </Link>
               </div>
               <div className="space-y-3">
-                {recentExpenses.map((expense, index) => (
-                  <ExpenseItem 
-                    key={expense.id} 
-                    expense={expense}
-                    className={`animate-slide-up stagger-${index + 1}`}
-                  />
-                ))}
+                {recentExpenses.length > 0 ? (
+                  recentExpenses.map((expense, index) => {
+                    // Transform expense for ExpenseItem
+                    const expenseForItem = {
+                      ...expense,
+                      groupId: typeof expense.groupId === 'string' 
+                        ? expense.groupId 
+                        : (expense.groupId.id || expense.groupId._id || ''),
+                    };
+                    return (
+                      <ExpenseItem 
+                        key={expense.id} 
+                        expense={expenseForItem as any}
+                        className={`animate-slide-up stagger-${index + 1}`}
+                      />
+                    );
+                  })
+                ) : (
+                  <p className="text-center text-muted-foreground py-8">No recent expenses</p>
+                )}
               </div>
             </div>
 
@@ -158,12 +337,12 @@ const Index = () => {
               <div className="bg-card rounded-2xl border border-border p-6 shadow-card">
                 <h3 className="text-lg font-semibold text-foreground mb-4">Spending by Category</h3>
                 <div className="relative">
-                  <CategoryPieChart expenses={mockExpenses} />
+                  <CategoryPieChart expenses={recentExpenses} />
                 </div>
               </div>
               <div className="bg-card rounded-2xl border border-border p-6 shadow-card">
                 <h3 className="text-lg font-semibold text-foreground mb-4">Monthly Trend</h3>
-                <MonthlyTrendChart expenses={mockExpenses} />
+                <MonthlyTrendChart expenses={recentExpenses} />
               </div>
             </div>
           </div>
@@ -173,16 +352,26 @@ const Index = () => {
             {/* Who Owes Whom */}
             <div className="bg-card rounded-2xl border border-border p-6 shadow-card">
               <h2 className="text-lg font-semibold text-foreground mb-4">Settlement Summary</h2>
-              <DebtSummary 
-                debts={mockDebts} 
-                currentUserId={currentUser.id}
-              />
+              {user ? (
+                <DebtSummary 
+                  debts={debtRelations} 
+                  currentUserId={user.id}
+                />
+              ) : (
+                <p className="text-center text-muted-foreground py-8">Loading...</p>
+              )}
             </div>
 
             {/* Activity Timeline */}
             <div className="bg-card rounded-2xl border border-border p-6 shadow-card">
               <h2 className="text-lg font-semibold text-foreground mb-4">Recent Activity</h2>
-              <ActivityTimeline activities={mockActivityLogs.slice(0, 5)} />
+              {loadingActivities ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="h-6 w-6 animate-spin text-primary" />
+                </div>
+              ) : (
+                <ActivityTimeline activities={activities.slice(0, 5)} />
+              )}
             </div>
           </div>
         </div>

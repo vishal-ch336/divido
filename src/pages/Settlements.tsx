@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -8,7 +8,10 @@ import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
-import { mockSettlements, mockGroups, mockUsers, currentUser } from '@/data/mockData';
+import { settlementsApi, groupsApi } from '@/lib/api';
+import { useAuth } from '@/hooks/useAuth';
+import { useToast } from '@/hooks/use-toast';
+import { ApiError } from '@/lib/api';
 import { formatCurrency, formatRelativeTime, getInitials } from '@/lib/format';
 import { 
   Search, 
@@ -19,7 +22,8 @@ import {
   AlertCircle,
   CreditCard,
   Smartphone,
-  Banknote
+  Banknote,
+  Loader2
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -35,23 +39,267 @@ const paymentIcons = {
   card: CreditCard,
 };
 
+interface Settlement {
+  id: string;
+  groupId: string | { id: string; name: string };
+  fromUser: { id: string; name: string; email: string; avatar?: string };
+  toUser: { id: string; name: string; email: string; avatar?: string };
+  amount: number;
+  status: 'pending' | 'confirmed' | 'disputed';
+  paymentMethod: 'cash' | 'upi' | 'card';
+  note?: string;
+  createdAt: string | Date;
+  confirmedAt?: string | Date;
+}
+
+interface Group {
+  id: string;
+  name: string;
+}
+
+interface GroupMember {
+  userId: string | { id: string; name: string; email: string; avatar?: string };
+  name?: string;
+}
+
 const Settlements = () => {
+  const { user } = useAuth();
+  const { toast } = useToast();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedGroup, setSelectedGroup] = useState<string>('all');
   const [selectedStatus, setSelectedStatus] = useState<string>('all');
   const [isSettleOpen, setIsSettleOpen] = useState(false);
+  const [settlements, setSettlements] = useState<Settlement[]>([]);
+  const [groups, setGroups] = useState<Group[]>([]);
+  const [groupMembers, setGroupMembers] = useState<GroupMember[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadingGroups, setLoadingGroups] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [confirming, setConfirming] = useState<string | null>(null);
 
-  const filteredSettlements = mockSettlements.filter(settlement => {
+  // Form state
+  const [formGroupId, setFormGroupId] = useState('');
+  const [formFromUser, setFormFromUser] = useState('');
+  const [formToUser, setFormToUser] = useState('');
+  const [formAmount, setFormAmount] = useState('');
+  const [formPaymentMethod, setFormPaymentMethod] = useState<'cash' | 'upi' | 'card'>('upi');
+  const [formNote, setFormNote] = useState('');
+
+  useEffect(() => {
+    fetchSettlements();
+    fetchGroups();
+  }, [selectedGroup, selectedStatus]);
+
+  useEffect(() => {
+    if (formGroupId) {
+      fetchGroupMembers(formGroupId);
+    } else {
+      setGroupMembers([]);
+    }
+  }, [formGroupId]);
+
+  const fetchSettlements = async () => {
+    setLoading(true);
+    try {
+      const groupId = selectedGroup === 'all' ? undefined : selectedGroup;
+      const status = selectedStatus === 'all' ? undefined : selectedStatus;
+      const data = await settlementsApi.getAll(groupId, status);
+      
+      const transformedSettlements = data.map((settlement: any) => ({
+        id: settlement.id || settlement._id,
+        groupId: typeof settlement.groupId === 'object' 
+          ? { id: settlement.groupId.id || settlement.groupId._id, name: settlement.groupId.name }
+          : settlement.groupId,
+        fromUser: typeof settlement.fromUser === 'object'
+          ? {
+              id: settlement.fromUser.id || settlement.fromUser._id,
+              name: settlement.fromUser.name || 'Unknown',
+              email: settlement.fromUser.email || '',
+              avatar: settlement.fromUser.avatar
+            }
+          : { id: settlement.fromUser, name: 'Unknown', email: '' },
+        toUser: typeof settlement.toUser === 'object'
+          ? {
+              id: settlement.toUser.id || settlement.toUser._id,
+              name: settlement.toUser.name || 'Unknown',
+              email: settlement.toUser.email || '',
+              avatar: settlement.toUser.avatar
+            }
+          : { id: settlement.toUser, name: 'Unknown', email: '' },
+        amount: settlement.amount,
+        status: settlement.status || 'pending',
+        paymentMethod: settlement.paymentMethod || 'cash',
+        note: settlement.note,
+        createdAt: settlement.createdAt ? new Date(settlement.createdAt) : new Date(),
+        confirmedAt: settlement.confirmedAt ? new Date(settlement.confirmedAt) : undefined,
+      }));
+      setSettlements(transformedSettlements);
+    } catch (error) {
+      console.error('Error fetching settlements:', error);
+      toast({
+        title: 'Error',
+        description: error instanceof ApiError ? error.message : 'Failed to load settlements',
+        variant: 'destructive',
+      });
+      setSettlements([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchGroups = async () => {
+    setLoadingGroups(true);
+    try {
+      const data = await groupsApi.getAll();
+      setGroups(data || []);
+    } catch (error) {
+      console.error('Error fetching groups:', error);
+      setGroups([]);
+    } finally {
+      setLoadingGroups(false);
+    }
+  };
+
+  const fetchGroupMembers = async (groupId: string) => {
+    try {
+      const group = await groupsApi.getById(groupId);
+      const members: GroupMember[] = [];
+      
+      // Add creator
+      if (group.createdBy) {
+        const creator = typeof group.createdBy === 'object' 
+          ? group.createdBy 
+          : { id: group.createdBy, name: 'Unknown' };
+        members.push({
+          userId: creator.id || creator._id,
+          name: creator.name,
+        });
+      }
+      
+      // Add members
+      if (group.members && Array.isArray(group.members)) {
+        group.members.forEach((member: any) => {
+          const memberUser = typeof member.userId === 'object' 
+            ? member.userId 
+            : { id: member.userId, name: 'Unknown' };
+          members.push({
+            userId: memberUser.id || memberUser._id,
+            name: memberUser.name,
+          });
+        });
+      }
+      
+      setGroupMembers(members);
+    } catch (error) {
+      console.error('Error fetching group members:', error);
+      setGroupMembers([]);
+    }
+  };
+
+  const handleCreateSettlement = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!formGroupId || !formFromUser || !formToUser || !formAmount) {
+      toast({
+        title: 'Validation Error',
+        description: 'Please fill in all required fields',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    if (parseFloat(formAmount) <= 0) {
+      toast({
+        title: 'Validation Error',
+        description: 'Amount must be greater than 0',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    if (formFromUser === formToUser) {
+      toast({
+        title: 'Validation Error',
+        description: 'From and To users must be different',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      await settlementsApi.create({
+        groupId: formGroupId,
+        fromUser: formFromUser,
+        toUser: formToUser,
+        amount: parseFloat(formAmount),
+        paymentMethod: formPaymentMethod,
+        note: formNote.trim() || undefined,
+      });
+
+      toast({
+        title: 'Success!',
+        description: 'Settlement recorded successfully',
+      });
+
+      // Reset form
+      setFormGroupId('');
+      setFormFromUser('');
+      setFormToUser('');
+      setFormAmount('');
+      setFormPaymentMethod('upi');
+      setFormNote('');
+      setIsSettleOpen(false);
+
+      // Refresh settlements
+      await fetchSettlements();
+    } catch (error) {
+      console.error('Error creating settlement:', error);
+      toast({
+        title: 'Error',
+        description: error instanceof ApiError ? error.message : 'Failed to create settlement',
+        variant: 'destructive',
+      });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleConfirmSettlement = async (settlementId: string) => {
+    setConfirming(settlementId);
+    try {
+      await settlementsApi.confirm(settlementId);
+      toast({
+        title: 'Success!',
+        description: 'Settlement confirmed successfully',
+      });
+      await fetchSettlements();
+    } catch (error) {
+      console.error('Error confirming settlement:', error);
+      toast({
+        title: 'Error',
+        description: error instanceof ApiError ? error.message : 'Failed to confirm settlement',
+        variant: 'destructive',
+      });
+    } finally {
+      setConfirming(null);
+    }
+  };
+
+  const filteredSettlements = settlements.filter(settlement => {
     const matchesSearch = 
       settlement.fromUser.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       settlement.toUser.name.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesGroup = selectedGroup === 'all' || settlement.groupId === selectedGroup;
+    const settlementGroupId = typeof settlement.groupId === 'string' 
+      ? settlement.groupId 
+      : (settlement.groupId.id || settlement.groupId._id || '');
+    const matchesGroup = selectedGroup === 'all' || settlementGroupId === selectedGroup;
     const matchesStatus = selectedStatus === 'all' || settlement.status === selectedStatus;
     return matchesSearch && matchesGroup && matchesStatus;
   });
 
-  const pendingCount = mockSettlements.filter(s => s.status === 'pending').length;
-  const totalPending = mockSettlements
+  const pendingCount = settlements.filter(s => s.status === 'pending').length;
+  const totalPending = settlements
     .filter(s => s.status === 'pending')
     .reduce((sum, s) => sum + s.amount, 0);
 
@@ -75,40 +323,86 @@ const Settlements = () => {
               <DialogHeader>
                 <DialogTitle>Record Settlement</DialogTitle>
               </DialogHeader>
-              <div className="space-y-4 mt-4">
+              <form onSubmit={handleCreateSettlement} className="space-y-4 mt-4">
                 <div className="space-y-2">
-                  <Label>From</Label>
-                  <Select>
+                  <Label>Group *</Label>
+                  {loadingGroups ? (
+                    <div className="flex items-center gap-2 p-3 border rounded-md">
+                      <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                      <span className="text-sm text-muted-foreground">Loading groups...</span>
+                    </div>
+                  ) : (
+                    <Select value={formGroupId} onValueChange={setFormGroupId} required>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select a group" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {groups.map(group => (
+                          <SelectItem key={group.id} value={group.id}>{group.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                </div>
+                <div className="space-y-2">
+                  <Label>From *</Label>
+                  <Select 
+                    value={formFromUser} 
+                    onValueChange={setFormFromUser} 
+                    required
+                    disabled={!formGroupId}
+                  >
                     <SelectTrigger>
                       <SelectValue placeholder="Who is paying?" />
                     </SelectTrigger>
                     <SelectContent>
-                      {mockUsers.map(user => (
-                        <SelectItem key={user.id} value={user.id}>{user.name}</SelectItem>
-                      ))}
+                      {groupMembers.map(member => {
+                        const memberId = typeof member.userId === 'string' ? member.userId : member.userId.id;
+                        const memberName = member.name || 'Unknown';
+                        return (
+                          <SelectItem key={memberId} value={memberId}>{memberName}</SelectItem>
+                        );
+                      })}
                     </SelectContent>
                   </Select>
                 </div>
                 <div className="space-y-2">
-                  <Label>To</Label>
-                  <Select>
+                  <Label>To *</Label>
+                  <Select 
+                    value={formToUser} 
+                    onValueChange={setFormToUser} 
+                    required
+                    disabled={!formGroupId}
+                  >
                     <SelectTrigger>
                       <SelectValue placeholder="Who is receiving?" />
                     </SelectTrigger>
                     <SelectContent>
-                      {mockUsers.map(user => (
-                        <SelectItem key={user.id} value={user.id}>{user.name}</SelectItem>
-                      ))}
+                      {groupMembers.map(member => {
+                        const memberId = typeof member.userId === 'string' ? member.userId : member.userId.id;
+                        const memberName = member.name || 'Unknown';
+                        return (
+                          <SelectItem key={memberId} value={memberId}>{memberName}</SelectItem>
+                        );
+                      })}
                     </SelectContent>
                   </Select>
                 </div>
                 <div className="space-y-2">
-                  <Label>Amount (₹)</Label>
-                  <Input type="number" placeholder="0.00" />
+                  <Label>Amount (₹) *</Label>
+                  <Input 
+                    type="number" 
+                    placeholder="0.00" 
+                    step="0.01"
+                    min="0.01"
+                    value={formAmount}
+                    onChange={(e) => setFormAmount(e.target.value)}
+                    required
+                  />
                 </div>
                 <div className="space-y-2">
                   <Label>Payment Method</Label>
-                  <Select defaultValue="upi">
+                  <Select value={formPaymentMethod} onValueChange={(v: 'cash' | 'upi' | 'card') => setFormPaymentMethod(v)}>
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
@@ -121,17 +415,40 @@ const Settlements = () => {
                 </div>
                 <div className="space-y-2">
                   <Label>Note (Optional)</Label>
-                  <Input placeholder="Add a note..." />
+                  <Input 
+                    placeholder="Add a note..." 
+                    value={formNote}
+                    onChange={(e) => setFormNote(e.target.value)}
+                    maxLength={500}
+                  />
                 </div>
                 <div className="flex gap-3 pt-2">
-                  <Button variant="outline" className="flex-1" onClick={() => setIsSettleOpen(false)}>
+                  <Button 
+                    type="button"
+                    variant="outline" 
+                    className="flex-1" 
+                    onClick={() => setIsSettleOpen(false)}
+                    disabled={submitting}
+                  >
                     Cancel
                   </Button>
-                  <Button variant="accent" className="flex-1">
-                    Record Payment
+                  <Button 
+                    type="submit" 
+                    variant="accent" 
+                    className="flex-1"
+                    disabled={submitting || !formGroupId || !formFromUser || !formToUser || !formAmount}
+                  >
+                    {submitting ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Recording...
+                      </>
+                    ) : (
+                      'Record Payment'
+                    )}
                   </Button>
                 </div>
-              </div>
+              </form>
             </DialogContent>
           </Dialog>
         </div>
@@ -179,9 +496,13 @@ const Settlements = () => {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Groups</SelectItem>
-              {mockGroups.map(group => (
-                <SelectItem key={group.id} value={group.id}>{group.name}</SelectItem>
-              ))}
+              {loadingGroups ? (
+                <SelectItem value="loading" disabled>Loading groups...</SelectItem>
+              ) : (
+                groups.map(group => (
+                  <SelectItem key={group.id} value={group.id}>{group.name}</SelectItem>
+                ))
+              )}
             </SelectContent>
           </Select>
           <Select value={selectedStatus} onValueChange={setSelectedStatus}>
@@ -199,13 +520,20 @@ const Settlements = () => {
 
         {/* Settlements List */}
         <div className="space-y-3">
-          {filteredSettlements.length > 0 ? (
+          {loading ? (
+            <div className="flex items-center justify-center py-16 bg-card rounded-2xl border border-border">
+              <div className="flex flex-col items-center gap-4">
+                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                <p className="text-muted-foreground">Loading settlements...</p>
+              </div>
+            </div>
+          ) : filteredSettlements.length > 0 ? (
             filteredSettlements.map((settlement, index) => {
               const status = statusConfig[settlement.status];
               const StatusIcon = status.icon;
               const PaymentIcon = paymentIcons[settlement.paymentMethod];
-              const isFromCurrentUser = settlement.fromUser.id === currentUser.id;
-              const isToCurrentUser = settlement.toUser.id === currentUser.id;
+              const isFromCurrentUser = settlement.fromUser.id === user?.id;
+              const isToCurrentUser = settlement.toUser.id === user?.id;
 
               return (
                 <div
@@ -262,8 +590,20 @@ const Settlements = () => {
                         {status.label}
                       </Badge>
                       {settlement.status === 'pending' && isToCurrentUser && (
-                        <Button size="sm" variant="accent">
-                          Confirm
+                        <Button 
+                          size="sm" 
+                          variant="accent"
+                          onClick={() => handleConfirmSettlement(settlement.id)}
+                          disabled={confirming === settlement.id}
+                        >
+                          {confirming === settlement.id ? (
+                            <>
+                              <Loader2 className="mr-2 h-3 w-3 animate-spin" />
+                              Confirming...
+                            </>
+                          ) : (
+                            'Confirm'
+                          )}
                         </Button>
                       )}
                     </div>

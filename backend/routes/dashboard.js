@@ -65,6 +65,97 @@ router.get('/summary', async (req, res) => {
       ],
     });
 
+    // Calculate debt relations (who owes whom) across all groups
+    const debtRelations = [];
+    for (const group of groups) {
+      await group.populate('members.userId', 'name email avatar');
+      await group.populate('createdBy', 'name email avatar');
+      
+      const allMembers = [
+        {
+          userId: group.createdBy,
+          balance: 0,
+        },
+        ...group.members,
+      ];
+
+      // Get balances for all members
+      const balances = [];
+      for (const member of allMembers) {
+        const memberUserId = member.userId._id || member.userId;
+        const memberData = group.members.find(
+          (m) => m.userId.toString() === memberUserId.toString()
+        );
+        const balance = memberData?.balance || 0;
+        
+        const userInfo = typeof member.userId === 'object' && member.userId.name
+          ? member.userId
+          : { _id: memberUserId, name: 'Unknown', email: '', avatar: null };
+        
+        balances.push({
+          userId: memberUserId,
+          user: userInfo,
+          balance,
+        });
+      }
+
+      // Calculate debts: who owes whom
+      const creditors = balances.filter(b => b.balance > 0.01).sort((a, b) => b.balance - a.balance);
+      const debtors = balances.filter(b => b.balance < -0.01).sort((a, b) => a.balance - b.balance);
+
+      // Match creditors with debtors
+      let creditorIndex = 0;
+      let debtorIndex = 0;
+
+      while (creditorIndex < creditors.length && debtorIndex < debtors.length) {
+        const creditor = creditors[creditorIndex];
+        const debtor = debtors[debtorIndex];
+
+        const amount = Math.min(creditor.balance, Math.abs(debtor.balance));
+        
+        if (amount > 0.01) {
+          debtRelations.push({
+            fromUser: {
+              id: debtor.user._id || debtor.userId,
+              name: debtor.user.name || 'Unknown',
+              email: debtor.user.email || '',
+              avatar: debtor.user.avatar,
+            },
+            toUser: {
+              id: creditor.user._id || creditor.userId,
+              name: creditor.user.name || 'Unknown',
+              email: creditor.user.email || '',
+              avatar: creditor.user.avatar,
+            },
+            amount: parseFloat(amount.toFixed(2)),
+            groupId: group._id,
+            groupName: group.name,
+          });
+        }
+
+        creditor.balance -= amount;
+        debtor.balance += amount;
+
+        if (creditor.balance < 0.01) creditorIndex++;
+        if (Math.abs(debtor.balance) < 0.01) debtorIndex++;
+      }
+    }
+
+    // Get recent expenses with proper formatting
+    const recentExpensesFormatted = expenses.slice(0, 4).map(exp => ({
+      id: exp._id,
+      groupId: exp.groupId._id || exp.groupId,
+      description: exp.description,
+      amount: exp.amount,
+      paidBy: exp.paidBy,
+      category: exp.category,
+      date: exp.date,
+      createdAt: exp.createdAt,
+      paymentMethod: exp.paymentMethod,
+      isFlagged: exp.isFlagged || false,
+      isRecurring: exp.isRecurring || false,
+    }));
+
     res.json({
       success: true,
       data: {
@@ -84,9 +175,13 @@ router.get('/summary', async (req, res) => {
             description: group.description,
             userBalance: memberData?.balance || 0,
             memberCount: group.members.length,
+            totalExpenses: expenses.filter(e => e.groupId.toString() === group._id.toString())
+              .reduce((sum, e) => sum + e.amount, 0),
+            currency: group.currency,
           };
         }),
-        recentExpenses: expenses.slice(0, 4),
+        recentExpenses: recentExpensesFormatted,
+        debtRelations,
       },
     });
   } catch (error) {

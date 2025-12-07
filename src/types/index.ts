@@ -10,11 +10,19 @@ export interface Group {
   id: string;
   name: string;
   description?: string;
-  createdBy: string;
+  createdBy: string | {
+    id?: string;
+    _id?: string;
+    name: string;
+    email: string;
+    avatar?: string;
+  };
   createdAt: Date;
   memberCount: number;
   totalExpenses: number;
   currency: string;
+  userBalance?: number;
+  debtRelations?: DebtRelation[];
 }
 
 export interface GroupMember {

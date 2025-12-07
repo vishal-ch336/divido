@@ -26,15 +26,85 @@ router.get('/', async (req, res) => {
       .populate('members.userId', 'name email avatar')
       .sort({ createdAt: -1 });
 
-    // Calculate total expenses for each group
+    // Calculate total expenses and debt relations for each group
     const groupsWithExpenses = await Promise.all(
       groups.map(async (group) => {
+        await group.populate('members.userId', 'name email avatar');
+        await group.populate('createdBy', 'name email avatar');
+        
         const expenses = await Expense.find({ groupId: group._id });
         const totalExpenses = expenses.reduce((sum, exp) => sum + exp.amount, 0);
         
-        const memberData = group.members.find(
+        const currentUserMemberData = group.members.find(
           (m) => m.userId._id.toString() === req.user._id.toString()
         );
+
+        // Calculate debt relations for this group
+        const allMembers = [
+          {
+            userId: group.createdBy,
+            balance: 0,
+          },
+          ...group.members,
+        ];
+
+        const balances = [];
+        for (const member of allMembers) {
+          const memberUserId = member.userId._id || member.userId;
+          const memberBalanceData = group.members.find(
+            (m) => m.userId.toString() === memberUserId.toString()
+          );
+          const balance = memberBalanceData?.balance || 0;
+          
+          const userInfo = typeof member.userId === 'object' && member.userId.name
+            ? member.userId
+            : { _id: memberUserId, name: 'Unknown', email: '', avatar: null };
+          
+          balances.push({
+            userId: memberUserId,
+            user: userInfo,
+            balance,
+          });
+        }
+
+        // Calculate debts: who owes whom
+        const debtRelations = [];
+        const creditors = balances.filter(b => b.balance > 0.01).sort((a, b) => b.balance - a.balance);
+        const debtors = balances.filter(b => b.balance < -0.01).sort((a, b) => a.balance - b.balance);
+
+        let creditorIndex = 0;
+        let debtorIndex = 0;
+
+        while (creditorIndex < creditors.length && debtorIndex < debtors.length) {
+          const creditor = creditors[creditorIndex];
+          const debtor = debtors[debtorIndex];
+
+          const amount = Math.min(creditor.balance, Math.abs(debtor.balance));
+          
+          if (amount > 0.01) {
+            debtRelations.push({
+              fromUser: {
+                id: debtor.user._id || debtor.userId,
+                name: debtor.user.name || 'Unknown',
+                email: debtor.user.email || '',
+                avatar: debtor.user.avatar,
+              },
+              toUser: {
+                id: creditor.user._id || creditor.userId,
+                name: creditor.user.name || 'Unknown',
+                email: creditor.user.email || '',
+                avatar: creditor.user.avatar,
+              },
+              amount: parseFloat(amount.toFixed(2)),
+            });
+          }
+
+          creditor.balance -= amount;
+          debtor.balance += amount;
+
+          if (creditor.balance < 0.01) creditorIndex++;
+          if (Math.abs(debtor.balance) < 0.01) debtorIndex++;
+        }
 
         return {
           id: group._id,
@@ -45,7 +115,8 @@ router.get('/', async (req, res) => {
           memberCount: group.members.length,
           totalExpenses,
           currency: group.currency,
-          userBalance: memberData?.balance || 0,
+          userBalance: currentUserMemberData?.balance || 0,
+          debtRelations,
         };
       })
     );
@@ -91,9 +162,84 @@ router.get('/:id', async (req, res) => {
       });
     }
 
+    // Calculate debt relations for this group
+    const allMembers = [
+      {
+        userId: group.createdBy,
+        balance: 0,
+      },
+      ...group.members,
+    ];
+
+    const balances = [];
+    for (const member of allMembers) {
+      const memberUserId = member.userId._id || member.userId;
+      const memberData = group.members.find(
+        (m) => m.userId.toString() === memberUserId.toString()
+      );
+      const balance = memberData?.balance || 0;
+      
+      const userInfo = typeof member.userId === 'object' && member.userId.name
+        ? member.userId
+        : { _id: memberUserId, name: 'Unknown', email: '', avatar: null };
+      
+      balances.push({
+        userId: memberUserId,
+        user: userInfo,
+        balance,
+      });
+    }
+
+    // Calculate debts: who owes whom
+    const debtRelations = [];
+    const creditors = balances.filter(b => b.balance > 0.01).sort((a, b) => b.balance - a.balance);
+    const debtors = balances.filter(b => b.balance < -0.01).sort((a, b) => a.balance - b.balance);
+
+    let creditorIndex = 0;
+    let debtorIndex = 0;
+
+    while (creditorIndex < creditors.length && debtorIndex < debtors.length) {
+      const creditor = creditors[creditorIndex];
+      const debtor = debtors[debtorIndex];
+
+      const amount = Math.min(creditor.balance, Math.abs(debtor.balance));
+      
+      if (amount > 0.01) {
+        debtRelations.push({
+          fromUser: {
+            id: debtor.user._id || debtor.userId,
+            name: debtor.user.name || 'Unknown',
+            email: debtor.user.email || '',
+            avatar: debtor.user.avatar,
+          },
+          toUser: {
+            id: creditor.user._id || creditor.userId,
+            name: creditor.user.name || 'Unknown',
+            email: creditor.user.email || '',
+            avatar: creditor.user.avatar,
+          },
+          amount: parseFloat(amount.toFixed(2)),
+        });
+      }
+
+      creditor.balance -= amount;
+      debtor.balance += amount;
+
+      if (creditor.balance < 0.01) creditorIndex++;
+      if (Math.abs(debtor.balance) < 0.01) debtorIndex++;
+    }
+
+    // Get total expenses for the group
+    const expenses = await Expense.find({ groupId: group._id });
+    const totalExpenses = expenses.reduce((sum, exp) => sum + exp.amount, 0);
+
     res.json({
       success: true,
-      data: group,
+      data: {
+        ...group.toObject(),
+        debtRelations,
+        totalExpenses,
+      },
     });
   } catch (error) {
     console.error('Get group error:', error);
@@ -112,8 +258,8 @@ router.post(
   [
     body('name').trim().isLength({ min: 1, max: 100 }),
     body('description').optional().trim().isLength({ max: 500 }),
-    body('memberNames').optional().isArray(),
-    body('memberNames.*').optional().trim().isLength({ min: 2, max: 100 }),
+    body('memberEmails').optional().isArray(),
+    body('memberEmails.*').optional().trim().isEmail().normalizeEmail(),
   ],
   async (req, res) => {
     try {
@@ -125,7 +271,7 @@ router.post(
         });
       }
 
-      const { name, description, currency, memberNames } = req.body;
+      const { name, description, currency, memberEmails } = req.body;
 
       // Start with creator as admin member
       const members = [{
@@ -135,43 +281,39 @@ router.post(
       }];
 
       // Add additional members if provided
-      if (memberNames && Array.isArray(memberNames) && memberNames.length > 0) {
-        // Remove duplicates and normalize names (trim, but keep case for display)
-        const uniqueNames = [...new Set(memberNames.map((name) => name.trim()).filter(name => name.length > 0))];
+      if (memberEmails && Array.isArray(memberEmails) && memberEmails.length > 0) {
+        // Remove duplicates and normalize emails (lowercase, trim)
+        const uniqueEmails = [...new Set(memberEmails.map((email) => email.trim().toLowerCase()).filter(email => email.length > 0))];
         
-        // Remove creator's name if included (case-insensitive)
-        const creatorName = req.user.name.trim();
-        const filteredNames = uniqueNames.filter(name => name.toLowerCase() !== creatorName.toLowerCase());
+        // Remove creator's email if included
+        const creatorEmail = req.user.email.toLowerCase();
+        const filteredEmails = uniqueEmails.filter(email => email !== creatorEmail);
 
-        if (filteredNames.length === 0) {
-          // All names were filtered out (only creator was added)
+        if (filteredEmails.length === 0) {
+          // All emails were filtered out (only creator was added)
           // Continue with just creator as member
         } else {
-          // Find users by name (case-insensitive exact match)
-          const notFoundNames = [];
-          const duplicateNames = [];
+          // Find users by email
+          const notFoundEmails = [];
 
-          for (const name of filteredNames) {
-            const nameTrimmed = name.trim();
-            // Find users with exact name match (case-insensitive)
-            const foundUsers = await User.find({
-              name: { $regex: new RegExp(`^${nameTrimmed.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') }
+          for (const email of filteredEmails) {
+            const emailTrimmed = email.trim().toLowerCase();
+            // Find user by email (emails are already normalized by express-validator)
+            const foundUser = await User.findOne({
+              email: emailTrimmed
             });
 
-            if (foundUsers.length === 0) {
-              notFoundNames.push(nameTrimmed);
-            } else if (foundUsers.length > 1) {
-              duplicateNames.push(nameTrimmed);
+            if (!foundUser) {
+              notFoundEmails.push(emailTrimmed);
             } else {
-              // Single match found - add to members
-              const user = foundUsers[0];
+              // User found - add to members
               // Don't add creator again
-              if (user._id.toString() !== req.user._id.toString()) {
+              if (foundUser._id.toString() !== req.user._id.toString()) {
                 // Check if already added (avoid duplicates)
-                const alreadyAdded = members.some(m => m.userId.toString() === user._id.toString());
+                const alreadyAdded = members.some(m => m.userId.toString() === foundUser._id.toString());
                 if (!alreadyAdded) {
                   members.push({
-                    userId: user._id,
+                    userId: foundUser._id,
                     role: 'member',
                     balance: 0,
                   });
@@ -180,17 +322,10 @@ router.post(
             }
           }
 
-          if (notFoundNames.length > 0) {
+          if (notFoundEmails.length > 0) {
             return res.status(400).json({
               success: false,
-              error: `The following names are not registered: ${notFoundNames.join(', ')}`,
-            });
-          }
-
-          if (duplicateNames.length > 0) {
-            return res.status(400).json({
-              success: false,
-              error: `Multiple users found with these names. Please be more specific: ${duplicateNames.join(', ')}`,
+              error: `The following emails are not registered: ${notFoundEmails.join(', ')}`,
             });
           }
         }
@@ -243,6 +378,57 @@ router.post(
     }
   }
 );
+
+// @route   DELETE /api/groups/:id
+// @desc    Delete a group
+// @access  Private (only creator/admin can delete)
+router.delete('/:id', async (req, res) => {
+  try {
+    const group = await Group.findById(req.params.id);
+
+    if (!group) {
+      return res.status(404).json({
+        success: false,
+        error: 'Group not found',
+      });
+    }
+
+    // Check if user is the creator
+    const isCreator = group.createdBy.toString() === req.user._id.toString();
+    
+    // Check if user is an admin member
+    const isAdmin = group.members.some(
+      (m) => m.userId.toString() === req.user._id.toString() && m.role === 'admin'
+    );
+
+    if (!isCreator && !isAdmin) {
+      return res.status(403).json({
+        success: false,
+        error: 'Not authorized to delete this group. Only the creator or admin members can delete groups.',
+      });
+    }
+
+    // Delete all related expenses
+    await Expense.deleteMany({ groupId: group._id });
+
+    // Delete all related activity logs
+    await ActivityLog.deleteMany({ groupId: group._id });
+
+    // Delete the group
+    await Group.findByIdAndDelete(req.params.id);
+
+    res.json({
+      success: true,
+      message: 'Group deleted successfully',
+    });
+  } catch (error) {
+    console.error('Delete group error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Server error',
+    });
+  }
+});
 
 export default router;
 

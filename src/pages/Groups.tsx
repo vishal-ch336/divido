@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { GroupCard } from '@/components/dashboard/GroupCard';
 import { Button } from '@/components/ui/button';
@@ -10,25 +11,25 @@ import { groupsApi } from '@/lib/api';
 import { useAuth } from '@/hooks/useAuth';
 import { useToast } from '@/hooks/use-toast';
 import { ApiError } from '@/lib/api';
-import { Plus, Search, Users, Loader2, X, User } from 'lucide-react';
-
-interface Group {
-  id: string;
-  name: string;
-  description?: string;
-  createdBy?: {
-    id?: string;
-    _id?: string;
-    name: string;
-    email: string;
-    avatar?: string;
-  } | string;
-  createdAt: string | Date;
-  memberCount: number;
-  totalExpenses: number;
-  currency: string;
-  userBalance: number;
-}
+import { formatCurrency } from '@/lib/format';
+import { Plus, Search, Users, Loader2, X, User, Trash2, MoreVertical, Receipt } from 'lucide-react';
+import { Group } from '@/types';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 const Groups = () => {
   const { user } = useAuth();
@@ -37,11 +38,14 @@ const Groups = () => {
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [newGroupName, setNewGroupName] = useState('');
   const [newGroupDescription, setNewGroupDescription] = useState('');
-  const [memberName, setMemberName] = useState('');
-  const [memberNames, setMemberNames] = useState<string[]>([]);
+  const [memberEmail, setMemberEmail] = useState('');
+  const [memberEmails, setMemberEmails] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadingGroups, setLoadingGroups] = useState(true);
   const [groups, setGroups] = useState<Group[]>([]);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [groupToDelete, setGroupToDelete] = useState<Group | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   // Fetch groups on mount
   useEffect(() => {
@@ -52,7 +56,28 @@ const Groups = () => {
     setLoadingGroups(true);
     try {
       const data = await groupsApi.getAll();
-      setGroups(data || []);
+      // Transform groups to include debtRelations
+      const transformedGroups = (data || []).map((group: any) => ({
+        ...group,
+        debtRelations: (group.debtRelations || []).map((dr: any) => ({
+          fromUser: {
+            id: dr.fromUser.id || dr.fromUser._id,
+            name: dr.fromUser.name || 'Unknown',
+            email: dr.fromUser.email || '',
+            avatar: dr.fromUser.avatar,
+            createdAt: new Date(),
+          },
+          toUser: {
+            id: dr.toUser.id || dr.toUser._id,
+            name: dr.toUser.name || 'Unknown',
+            email: dr.toUser.email || '',
+            avatar: dr.toUser.avatar,
+            createdAt: new Date(),
+          },
+          amount: dr.amount,
+        })),
+      }));
+      setGroups(transformedGroups);
     } catch (error) {
       console.error('Error fetching groups:', error);
       toast({
@@ -66,33 +91,33 @@ const Groups = () => {
     }
   };
 
-  const validateName = (name: string): boolean => {
-    const trimmedName = name.trim();
-    return trimmedName.length >= 2 && trimmedName.length <= 100;
+  const validateEmail = (email: string): boolean => {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return emailRegex.test(email.trim());
   };
 
   const handleAddMember = () => {
-    const name = memberName.trim();
+    const email = memberEmail.trim().toLowerCase();
     
-    if (!name) {
+    if (!email) {
       toast({
         title: 'Validation Error',
-        description: 'Please enter a name',
+        description: 'Please enter an email address',
         variant: 'destructive',
       });
       return;
     }
 
-    if (!validateName(name)) {
+    if (!validateEmail(email)) {
       toast({
         title: 'Validation Error',
-        description: 'Name must be between 2 and 100 characters',
+        description: 'Please enter a valid email address',
         variant: 'destructive',
       });
       return;
     }
 
-    if (user && name.toLowerCase() === user.name.toLowerCase()) {
+    if (user && email === user.email.toLowerCase()) {
       toast({
         title: 'Validation Error',
         description: 'You cannot add yourself as a member',
@@ -102,21 +127,21 @@ const Groups = () => {
     }
 
     // Check for duplicates (case-insensitive)
-    if (memberNames.some(n => n.toLowerCase() === name.toLowerCase())) {
+    if (memberEmails.some(e => e.toLowerCase() === email)) {
       toast({
         title: 'Validation Error',
-        description: 'This name is already added',
+        description: 'This email is already added',
         variant: 'destructive',
       });
       return;
     }
 
-    setMemberNames([...memberNames, name]);
-    setMemberName('');
+    setMemberEmails([...memberEmails, email]);
+    setMemberEmail('');
   };
 
-  const handleRemoveMember = (name: string) => {
-    setMemberNames(memberNames.filter(n => n !== name));
+  const handleRemoveMember = (email: string) => {
+    setMemberEmails(memberEmails.filter(e => e !== email));
   };
 
   const handleCreateGroup = async (e: React.FormEvent) => {
@@ -150,12 +175,12 @@ const Groups = () => {
       return;
     }
 
-    // Validate member names
-    const invalidNames = memberNames.filter(name => !validateName(name));
-    if (invalidNames.length > 0) {
+    // Validate member emails
+    const invalidEmails = memberEmails.filter(email => !validateEmail(email));
+    if (invalidEmails.length > 0) {
       toast({
         title: 'Validation Error',
-        description: `Invalid names: ${invalidNames.join(', ')}`,
+        description: `Invalid emails: ${invalidEmails.join(', ')}`,
         variant: 'destructive',
       });
       return;
@@ -167,10 +192,10 @@ const Groups = () => {
         name: newGroupName.trim(),
         description: newGroupDescription.trim() || undefined,
         currency: 'INR',
-        memberNames: memberNames.length > 0 ? memberNames : undefined,
+        memberEmails: memberEmails.length > 0 ? memberEmails : undefined,
       });
 
-      const memberCount = memberNames.length > 0 ? ` with ${memberNames.length} member${memberNames.length === 1 ? '' : 's'}` : '';
+      const memberCount = memberEmails.length > 0 ? ` with ${memberEmails.length} member${memberEmails.length === 1 ? '' : 's'}` : '';
       toast({
         title: 'Success!',
         description: `Group "${newGroup.name}" created successfully${memberCount}`,
@@ -179,8 +204,8 @@ const Groups = () => {
       // Reset form
       setNewGroupName('');
       setNewGroupDescription('');
-      setMemberName('');
-      setMemberNames([]);
+      setMemberEmail('');
+      setMemberEmails([]);
       setIsCreateOpen(false);
 
       // Refresh groups list
@@ -204,9 +229,39 @@ const Groups = () => {
         // Reset form when closing
         setNewGroupName('');
         setNewGroupDescription('');
-        setMemberName('');
-        setMemberNames([]);
+        setMemberEmail('');
+        setMemberEmails([]);
       }
+    }
+  };
+
+  const handleDeleteClick = (group: Group) => {
+    setGroupToDelete(group);
+    setDeleteDialogOpen(true);
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!groupToDelete) return;
+
+    setDeleting(true);
+    try {
+      await groupsApi.delete(groupToDelete.id);
+      toast({
+        title: 'Success!',
+        description: `Group "${groupToDelete.name}" deleted successfully`,
+      });
+      setDeleteDialogOpen(false);
+      setGroupToDelete(null);
+      await fetchGroups();
+    } catch (error) {
+      console.error('Error deleting group:', error);
+      toast({
+        title: 'Error',
+        description: error instanceof ApiError ? error.message : 'Failed to delete group. Please try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -269,17 +324,17 @@ const Groups = () => {
 
                 {/* Members Section */}
                 <div className="space-y-2">
-                  <Label htmlFor="memberName">Add Members (Optional)</Label>
+                  <Label htmlFor="memberEmail">Add Members (Optional)</Label>
                   <p className="text-xs text-muted-foreground">
-                    Add members by their names. They must have an account.
+                    Add members by their email addresses. They must have an account.
                   </p>
                   <div className="flex gap-2">
                     <Input
-                      id="memberName"
-                      type="text"
-                      placeholder="Enter member name"
-                      value={memberName}
-                      onChange={(e) => setMemberName(e.target.value)}
+                      id="memberEmail"
+                      type="email"
+                      placeholder="Enter member email"
+                      value={memberEmail}
+                      onChange={(e) => setMemberEmail(e.target.value)}
                       onKeyDown={(e) => {
                         if (e.key === 'Enter') {
                           e.preventDefault();
@@ -293,25 +348,25 @@ const Groups = () => {
                       type="button"
                       variant="outline"
                       onClick={handleAddMember}
-                      disabled={loading || !memberName.trim()}
+                      disabled={loading || !memberEmail.trim()}
                     >
                       <Plus className="h-4 w-4" />
                     </Button>
                   </div>
 
-                  {/* Member Name Tags */}
-                  {memberNames.length > 0 && (
+                  {/* Member Email Tags */}
+                  {memberEmails.length > 0 && (
                     <div className="flex flex-wrap gap-2 mt-2 p-3 border rounded-lg bg-muted/30">
-                      {memberNames.map((name, index) => (
+                      {memberEmails.map((email, index) => (
                         <div
                           key={index}
                           className="flex items-center gap-2 px-3 py-1.5 bg-background border rounded-full text-sm"
                         >
                           <User className="h-3.5 w-3.5 text-muted-foreground" />
-                          <span className="text-foreground">{name}</span>
+                          <span className="text-foreground">{email}</span>
                           <button
                             type="button"
-                            onClick={() => handleRemoveMember(name)}
+                            onClick={() => handleRemoveMember(email)}
                             disabled={loading}
                             className="ml-1 hover:bg-muted rounded-full p-0.5 transition-colors"
                           >
@@ -374,15 +429,132 @@ const Groups = () => {
             </div>
           </div>
         ) : filteredGroups.length > 0 ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="space-y-4">
             {filteredGroups.map((group, index) => {
+              // Check if user is creator (for delete permission)
+              const isCreator = typeof group.createdBy === 'object' 
+                ? (group.createdBy.id || group.createdBy._id) === user?.id
+                : group.createdBy === user?.id;
+              
+              // Get debts involving current user
+              const userDebts = group.debtRelations?.filter(d => 
+                (d.fromUser.id === user?.id || d.toUser.id === user?.id)
+              ) || [];
+              
+              const isPositive = (group.userBalance || 0) > 0;
+              const isNegative = (group.userBalance || 0) < 0;
+              
               return (
-                <GroupCard
+                <Link
                   key={group.id}
-                  group={group}
-                  userBalance={group.userBalance || 0}
-                  className={`animate-slide-up stagger-${(index % 5) + 1}`}
-                />
+                  to={`/groups/${group.id}`}
+                  className="block"
+                >
+                  <div className="bg-card rounded-xl border border-border p-5 shadow-card hover:shadow-lg transition-all">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-4 mb-4">
+                          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                            <Users className="h-6 w-6" />
+                          </div>
+                          <div className="flex-1">
+                            <h3 className="font-semibold text-foreground text-lg">{group.name}</h3>
+                            {group.description && (
+                              <p className="text-sm text-muted-foreground mt-0.5 line-clamp-1">{group.description}</p>
+                            )}
+                          </div>
+                          {isCreator && (
+                            <div onClick={(e) => e.preventDefault()}>
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-8 w-8"
+                                    onClick={(e) => {
+                                      e.preventDefault();
+                                      e.stopPropagation();
+                                    }}
+                                  >
+                                    <MoreVertical className="h-4 w-4" />
+                                  </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end">
+                                  <DropdownMenuItem
+                                    className="text-destructive focus:text-destructive"
+                                    onClick={(e) => {
+                                      e.preventDefault();
+                                      e.stopPropagation();
+                                      handleDeleteClick(group);
+                                    }}
+                                  >
+                                    <Trash2 className="mr-2 h-4 w-4" />
+                                    Delete Group
+                                  </DropdownMenuItem>
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex items-center justify-between border-t border-border pt-4">
+                          <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                            <span className="flex items-center gap-1.5">
+                              <Users className="h-4 w-4" />
+                              {group.memberCount} members
+                            </span>
+                            <span className="flex items-center gap-1.5">
+                              <Receipt className="h-4 w-4" />
+                              {formatCurrency(group.totalExpenses)}
+                            </span>
+                          </div>
+                          <div className={`text-sm font-semibold px-3 py-1 rounded-full ${
+                            isPositive ? 'bg-credit-light text-credit' :
+                            isNegative ? 'bg-debit-light text-debit' :
+                            'bg-muted text-muted-foreground'
+                          }`}>
+                            {isPositive && '+'}
+                            {(group.userBalance || 0) !== 0 ? formatCurrency(group.userBalance || 0) : 'Settled'}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    
+                    {/* Debt Summary Preview */}
+                    {userDebts.length > 0 && (
+                      <div className="mt-4 pt-4 border-t border-border">
+                        <h4 className="text-sm font-medium text-foreground mb-3">Your Balances in this Group</h4>
+                        <div className="space-y-2">
+                          {userDebts.map((debt, debtIndex) => {
+                            const isYouOwe = debt.fromUser.id === user?.id;
+                            const otherUser = isYouOwe ? debt.toUser : debt.fromUser;
+                            return (
+                              <div
+                                key={debtIndex}
+                                className={`flex items-center justify-between p-3 rounded-lg ${
+                                  isYouOwe 
+                                    ? 'bg-debit-light/50 border border-debit/10' 
+                                    : 'bg-credit-light/50 border border-credit/10'
+                                }`}
+                              >
+                                <div className="flex items-center gap-3">
+                                  <User className="h-4 w-4 text-muted-foreground" />
+                                  <span className="text-sm text-foreground">
+                                    {isYouOwe ? 'You owe' : 'Owes you'}: <strong>{otherUser.name}</strong>
+                                  </span>
+                                </div>
+                                <span className={`text-sm font-semibold ${
+                                  isYouOwe ? 'text-debit' : 'text-credit'
+                                }`}>
+                                  {formatCurrency(debt.amount)}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </Link>
               );
             })}
           </div>
@@ -403,6 +575,35 @@ const Groups = () => {
             )}
           </div>
         )}
+
+        {/* Delete Confirmation Dialog */}
+        <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete Group</AlertDialogTitle>
+              <AlertDialogDescription>
+                Are you sure you want to delete "{groupToDelete?.name}"? This action cannot be undone and will delete all expenses and activity logs associated with this group.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={handleDeleteConfirm}
+                disabled={deleting}
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              >
+                {deleting ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Deleting...
+                  </>
+                ) : (
+                  'Delete'
+                )}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     </MainLayout>
   );

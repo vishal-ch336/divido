@@ -151,10 +151,16 @@ export const groupsApi = {
     return apiRequest<any>(`/groups/${id}`);
   },
   
-  create: async (data: { name: string; description?: string; currency?: string; memberNames?: string[] }) => {
+  create: async (data: { name: string; description?: string; currency?: string; memberEmails?: string[] }) => {
     return apiRequest<any>('/groups', {
       method: 'POST',
       body: JSON.stringify(data),
+    });
+  },
+  
+  delete: async (id: string) => {
+    return apiRequest<any>(`/groups/${id}`, {
+      method: 'DELETE',
     });
   },
 };
@@ -201,6 +207,41 @@ export const activityApi = {
   },
 };
 
+// Settlements API
+export const settlementsApi = {
+  getAll: async (groupId?: string, status?: string) => {
+    const params = new URLSearchParams();
+    if (groupId) params.append('groupId', groupId);
+    if (status) params.append('status', status);
+    const query = params.toString() ? `?${params.toString()}` : '';
+    return apiRequest<any[]>(`/settlements${query}`);
+  },
+  
+  calculate: async (groupId: string) => {
+    return apiRequest<any[]>(`/settlements/calculate?groupId=${groupId}`);
+  },
+  
+  create: async (data: {
+    groupId: string;
+    fromUser: string;
+    toUser: string;
+    amount: number;
+    paymentMethod?: 'cash' | 'upi' | 'card';
+    note?: string;
+  }) => {
+    return apiRequest<any>('/settlements', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+  
+  confirm: async (id: string) => {
+    return apiRequest<any>(`/settlements/${id}/confirm`, {
+      method: 'PATCH',
+    });
+  },
+};
+
 // Dashboard API
 export const dashboardApi = {
   getSummary: async () => {
@@ -213,6 +254,13 @@ export const dashboardApi = {
       pendingSettlements: number;
       groups: any[];
       recentExpenses: any[];
+      debtRelations: Array<{
+        fromUser: { id: string; name: string; email: string; avatar?: string };
+        toUser: { id: string; name: string; email: string; avatar?: string };
+        amount: number;
+        groupId?: string;
+        groupName?: string;
+      }>;
     }>('/dashboard/summary');
   },
 };

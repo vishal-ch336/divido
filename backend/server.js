@@ -8,6 +8,7 @@ import groupRoutes from './routes/groups.js';
 import expenseRoutes from './routes/expenses.js';
 import activityRoutes from './routes/activity.js';
 import dashboardRoutes from './routes/dashboard.js';
+import settlementRoutes from './routes/settlements.js';
 
 // Load environment variables
 dotenv.config();
@@ -19,7 +20,7 @@ const app = express();
 
 // Middleware
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:8080',
+  origin: process.env.FRONTEND_URL || ['http://localhost:5173', 'http://localhost:8080', 'http://localhost:3000'],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
@@ -33,6 +34,7 @@ app.use('/api/groups', groupRoutes);
 app.use('/api/expenses', expenseRoutes);
 app.use('/api/activity', activityRoutes);
 app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/settlements', settlementRoutes);
 
 // Health check (works even if DB is not connected)
 app.get('/api/health', (req, res) => {
