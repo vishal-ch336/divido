@@ -6,7 +6,13 @@ interface User {
   id: string;
   email: string;
   name: string;
+  phone?: string;
   avatar?: string;
+  notifications?: {
+    email: boolean;
+    push: boolean;
+    reminders: boolean;
+  };
   createdAt: string;
 }
 
@@ -17,6 +23,7 @@ interface AuthContextType {
   signUp: (email: string, password: string, fullName: string) => Promise<{ error: Error | null }>;
   signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
+  logout: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -30,7 +37,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     // Check for existing token and validate it
     const token = getToken();
     if (token) {
-      authApi.getMe()
+      authApi.getCurrentUser()
         .then((response) => {
           setUser(response.user);
           setSession({ token });
@@ -41,7 +48,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           removeToken();
           setUser(null);
           setSession(null);
-        setLoading(false);
+          setLoading(false);
         });
     } else {
       setLoading(false);
@@ -55,7 +62,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setSession({ token: response.token });
       return { error: null };
     } catch (error) {
-      const apiError = error instanceof ApiError 
+      const apiError = error instanceof ApiError
         ? new Error(error.message)
         : new Error('Signup failed. Please try again.');
       return { error: apiError };
@@ -69,7 +76,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setSession({ token: response.token });
       return { error: null };
     } catch (error) {
-      const apiError = error instanceof ApiError 
+      const apiError = error instanceof ApiError
         ? new Error(error.message)
         : new Error('Login failed. Please try again.');
       return { error: apiError };
@@ -82,8 +89,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setSession(null);
   };
 
+  const logout = () => {
+    removeToken();
+    setUser(null);
+    setSession(null);
+  };
+
   return (
-    <AuthContext.Provider value={{ user, session, loading, signUp, signIn, signOut }}>
+    <AuthContext.Provider value={{ user, session, loading, signUp, signIn, signOut, logout }}>
       {children}
     </AuthContext.Provider>
   );

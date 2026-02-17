@@ -1,4 +1,4 @@
-# ExpenseEase India - Setup Guide
+# Divido - Setup Guide
 
 ## Prerequisites
 
@@ -21,7 +21,7 @@ npm install
 3. Create a `.env` file in the `backend` directory:
 ```env
 PORT=5000
-MONGODB_URI=mongodb://localhost:27017/expenseease
+MONGODB_URI=mongodb://localhost:27017/divido
 JWT_SECRET=your-super-secret-jwt-key-change-this-in-production
 NODE_ENV=development
 FRONTEND_URL=http://localhost:8080

@@ -70,32 +70,39 @@ router.get('/summary', async (req, res) => {
     for (const group of groups) {
       await group.populate('members.userId', 'name email avatar');
       await group.populate('createdBy', 'name email avatar');
-      
-      const allMembers = [
-        {
-          userId: group.createdBy,
-          balance: 0,
-        },
-        ...group.members,
-      ];
 
-      // Get balances for all members
+      // Get balances for all members including creator
       const balances = [];
-      for (const member of allMembers) {
+
+      // First, add all members from group.members
+      for (const member of group.members) {
         const memberUserId = member.userId._id || member.userId;
-        const memberData = group.members.find(
-          (m) => m.userId.toString() === memberUserId.toString()
-        );
-        const balance = memberData?.balance || 0;
-        
         const userInfo = typeof member.userId === 'object' && member.userId.name
           ? member.userId
           : { _id: memberUserId, name: 'Unknown', email: '', avatar: null };
-        
+
         balances.push({
           userId: memberUserId,
           user: userInfo,
-          balance,
+          balance: member.balance || 0,
+        });
+      }
+
+      // Check if creator is already in members list, if not add them
+      const creatorId = group.createdBy._id || group.createdBy;
+      const creatorAlreadyInMembers = balances.some(
+        b => b.userId.toString() === creatorId.toString()
+      );
+
+      if (!creatorAlreadyInMembers) {
+        const creatorInfo = typeof group.createdBy === 'object' && group.createdBy.name
+          ? group.createdBy
+          : { _id: creatorId, name: 'Unknown', email: '', avatar: null };
+
+        balances.push({
+          userId: creatorId,
+          user: creatorInfo,
+          balance: 0, // Creator not in members means they have 0 balance
         });
       }
 
@@ -112,7 +119,7 @@ router.get('/summary', async (req, res) => {
         const debtor = debtors[debtorIndex];
 
         const amount = Math.min(creditor.balance, Math.abs(debtor.balance));
-        
+
         if (amount > 0.01) {
           debtRelations.push({
             fromUser: {

@@ -13,12 +13,12 @@ import { useAuth } from '@/hooks/useAuth';
 import { useToast } from '@/hooks/use-toast';
 import { ApiError } from '@/lib/api';
 import { formatCurrency, formatRelativeTime, getInitials } from '@/lib/format';
-import { 
-  Search, 
-  Plus, 
-  ArrowRight, 
-  CheckCircle, 
-  Clock, 
+import {
+  Search,
+  Plus,
+  ArrowRight,
+  CheckCircle,
+  Clock,
   AlertCircle,
   CreditCard,
   Smartphone,
@@ -41,15 +41,15 @@ const paymentIcons = {
 
 interface Settlement {
   id: string;
-  groupId: string | { id: string; name: string };
+  groupId: string | { id?: string; _id?: string; name: string };
   fromUser: { id: string; name: string; email: string; avatar?: string };
   toUser: { id: string; name: string; email: string; avatar?: string };
   amount: number;
   status: 'pending' | 'confirmed' | 'disputed';
   paymentMethod: 'cash' | 'upi' | 'card';
   note?: string;
-  createdAt: string | Date;
-  confirmedAt?: string | Date;
+  createdAt: Date;
+  confirmedAt?: Date;
 }
 
 interface Group {
@@ -104,27 +104,27 @@ const Settlements = () => {
       const groupId = selectedGroup === 'all' ? undefined : selectedGroup;
       const status = selectedStatus === 'all' ? undefined : selectedStatus;
       const data = await settlementsApi.getAll(groupId, status);
-      
+
       const transformedSettlements = data.map((settlement: any) => ({
         id: settlement.id || settlement._id,
-        groupId: typeof settlement.groupId === 'object' 
+        groupId: typeof settlement.groupId === 'object'
           ? { id: settlement.groupId.id || settlement.groupId._id, name: settlement.groupId.name }
           : settlement.groupId,
         fromUser: typeof settlement.fromUser === 'object'
           ? {
-              id: settlement.fromUser.id || settlement.fromUser._id,
-              name: settlement.fromUser.name || 'Unknown',
-              email: settlement.fromUser.email || '',
-              avatar: settlement.fromUser.avatar
-            }
+            id: settlement.fromUser.id || settlement.fromUser._id,
+            name: settlement.fromUser.name || 'Unknown',
+            email: settlement.fromUser.email || '',
+            avatar: settlement.fromUser.avatar
+          }
           : { id: settlement.fromUser, name: 'Unknown', email: '' },
         toUser: typeof settlement.toUser === 'object'
           ? {
-              id: settlement.toUser.id || settlement.toUser._id,
-              name: settlement.toUser.name || 'Unknown',
-              email: settlement.toUser.email || '',
-              avatar: settlement.toUser.avatar
-            }
+            id: settlement.toUser.id || settlement.toUser._id,
+            name: settlement.toUser.name || 'Unknown',
+            email: settlement.toUser.email || '',
+            avatar: settlement.toUser.avatar
+          }
           : { id: settlement.toUser, name: 'Unknown', email: '' },
         amount: settlement.amount,
         status: settlement.status || 'pending',
@@ -164,23 +164,23 @@ const Settlements = () => {
     try {
       const group = await groupsApi.getById(groupId);
       const members: GroupMember[] = [];
-      
+
       // Add creator
       if (group.createdBy) {
-        const creator = typeof group.createdBy === 'object' 
-          ? group.createdBy 
+        const creator = typeof group.createdBy === 'object'
+          ? group.createdBy
           : { id: group.createdBy, name: 'Unknown' };
         members.push({
           userId: creator.id || creator._id,
           name: creator.name,
         });
       }
-      
+
       // Add members
       if (group.members && Array.isArray(group.members)) {
         group.members.forEach((member: any) => {
-          const memberUser = typeof member.userId === 'object' 
-            ? member.userId 
+          const memberUser = typeof member.userId === 'object'
+            ? member.userId
             : { id: member.userId, name: 'Unknown' };
           members.push({
             userId: memberUser.id || memberUser._id,
@@ -188,7 +188,7 @@ const Settlements = () => {
           });
         });
       }
-      
+
       setGroupMembers(members);
     } catch (error) {
       console.error('Error fetching group members:', error);
@@ -287,11 +287,11 @@ const Settlements = () => {
   };
 
   const filteredSettlements = settlements.filter(settlement => {
-    const matchesSearch = 
+    const matchesSearch =
       settlement.fromUser.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       settlement.toUser.name.toLowerCase().includes(searchQuery.toLowerCase());
-    const settlementGroupId = typeof settlement.groupId === 'string' 
-      ? settlement.groupId 
+    const settlementGroupId = typeof settlement.groupId === 'string'
+      ? settlement.groupId
       : (settlement.groupId.id || settlement.groupId._id || '');
     const matchesGroup = selectedGroup === 'all' || settlementGroupId === selectedGroup;
     const matchesStatus = selectedStatus === 'all' || settlement.status === selectedStatus;
@@ -346,9 +346,9 @@ const Settlements = () => {
                 </div>
                 <div className="space-y-2">
                   <Label>From *</Label>
-                  <Select 
-                    value={formFromUser} 
-                    onValueChange={setFormFromUser} 
+                  <Select
+                    value={formFromUser}
+                    onValueChange={setFormFromUser}
                     required
                     disabled={!formGroupId}
                   >
@@ -356,11 +356,11 @@ const Settlements = () => {
                       <SelectValue placeholder="Who is paying?" />
                     </SelectTrigger>
                     <SelectContent>
-                      {groupMembers.map(member => {
+                      {groupMembers.map((member, index) => {
                         const memberId = typeof member.userId === 'string' ? member.userId : member.userId.id;
                         const memberName = member.name || 'Unknown';
                         return (
-                          <SelectItem key={memberId} value={memberId}>{memberName}</SelectItem>
+                          <SelectItem key={`from-${memberId}-${index}`} value={memberId}>{memberName}</SelectItem>
                         );
                       })}
                     </SelectContent>
@@ -368,9 +368,9 @@ const Settlements = () => {
                 </div>
                 <div className="space-y-2">
                   <Label>To *</Label>
-                  <Select 
-                    value={formToUser} 
-                    onValueChange={setFormToUser} 
+                  <Select
+                    value={formToUser}
+                    onValueChange={setFormToUser}
                     required
                     disabled={!formGroupId}
                   >
@@ -378,11 +378,11 @@ const Settlements = () => {
                       <SelectValue placeholder="Who is receiving?" />
                     </SelectTrigger>
                     <SelectContent>
-                      {groupMembers.map(member => {
+                      {groupMembers.map((member, index) => {
                         const memberId = typeof member.userId === 'string' ? member.userId : member.userId.id;
                         const memberName = member.name || 'Unknown';
                         return (
-                          <SelectItem key={memberId} value={memberId}>{memberName}</SelectItem>
+                          <SelectItem key={`to-${memberId}-${index}`} value={memberId}>{memberName}</SelectItem>
                         );
                       })}
                     </SelectContent>
@@ -390,9 +390,9 @@ const Settlements = () => {
                 </div>
                 <div className="space-y-2">
                   <Label>Amount (₹) *</Label>
-                  <Input 
-                    type="number" 
-                    placeholder="0.00" 
+                  <Input
+                    type="number"
+                    placeholder="0.00"
                     step="0.01"
                     min="0.01"
                     value={formAmount}
@@ -415,26 +415,26 @@ const Settlements = () => {
                 </div>
                 <div className="space-y-2">
                   <Label>Note (Optional)</Label>
-                  <Input 
-                    placeholder="Add a note..." 
+                  <Input
+                    placeholder="Add a note..."
                     value={formNote}
                     onChange={(e) => setFormNote(e.target.value)}
                     maxLength={500}
                   />
                 </div>
                 <div className="flex gap-3 pt-2">
-                  <Button 
+                  <Button
                     type="button"
-                    variant="outline" 
-                    className="flex-1" 
+                    variant="outline"
+                    className="flex-1"
                     onClick={() => setIsSettleOpen(false)}
                     disabled={submitting}
                   >
                     Cancel
                   </Button>
-                  <Button 
-                    type="submit" 
-                    variant="accent" 
+                  <Button
+                    type="submit"
+                    variant="accent"
                     className="flex-1"
                     disabled={submitting || !formGroupId || !formFromUser || !formToUser || !formAmount}
                   >
@@ -590,8 +590,8 @@ const Settlements = () => {
                         {status.label}
                       </Badge>
                       {settlement.status === 'pending' && isToCurrentUser && (
-                        <Button 
-                          size="sm" 
+                        <Button
+                          size="sm"
                           variant="accent"
                           onClick={() => handleConfirmSettlement(settlement.id)}
                           disabled={confirming === settlement.id}

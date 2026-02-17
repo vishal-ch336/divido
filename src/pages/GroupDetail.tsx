@@ -5,12 +5,13 @@ import { Button } from '@/components/ui/button';
 import { DebtSummary } from '@/components/dashboard/DebtSummary';
 import { ExpenseItem } from '@/components/dashboard/ExpenseItem';
 import { AddExpenseDialog } from '@/components/expenses/AddExpenseDialog';
+import { AddMembersDialog } from '@/components/groups/AddMembersDialog';
 import { groupsApi, expensesApi, activityApi } from '@/lib/api';
 import { useAuth } from '@/hooks/useAuth';
 import { useToast } from '@/hooks/use-toast';
 import { ApiError } from '@/lib/api';
 import { formatCurrency } from '@/lib/format';
-import { ArrowLeft, Users, Receipt, Loader2, Trash2, MoreVertical } from 'lucide-react';
+import { ArrowLeft, Users, Receipt, Loader2, Trash2, MoreVertical, UserPlus } from 'lucide-react';
 import { DebtRelation, Expense, ActivityLog } from '@/types';
 import {
   DropdownMenu,
@@ -70,7 +71,7 @@ const GroupDetail = () => {
     setLoading(true);
     try {
       const data = await groupsApi.getById(id);
-      
+
       // Transform debt relations
       const debtRelations: DebtRelation[] = (data.debtRelations || []).map((dr: any) => ({
         fromUser: {
@@ -130,20 +131,20 @@ const GroupDetail = () => {
         groupId: typeof exp.groupId === 'object' ? exp.groupId.id || exp.groupId._id : exp.groupId,
         description: exp.description,
         amount: exp.amount,
-        paidBy: typeof exp.paidBy === 'object' 
+        paidBy: typeof exp.paidBy === 'object'
           ? {
-              id: exp.paidBy.id || exp.paidBy._id,
-              name: exp.paidBy.name || 'Unknown',
-              email: exp.paidBy.email || '',
-              avatar: exp.paidBy.avatar,
-              createdAt: new Date(),
-            }
+            id: exp.paidBy.id || exp.paidBy._id,
+            name: exp.paidBy.name || 'Unknown',
+            email: exp.paidBy.email || '',
+            avatar: exp.paidBy.avatar,
+            createdAt: new Date(),
+          }
           : {
-              id: exp.paidBy,
-              name: 'Unknown',
-              email: '',
-              createdAt: new Date(),
-            },
+            id: exp.paidBy,
+            name: 'Unknown',
+            email: '',
+            createdAt: new Date(),
+          },
         category: exp.category,
         date: exp.date ? new Date(exp.date) : new Date(),
         createdAt: exp.createdAt ? new Date(exp.createdAt) : new Date(),
@@ -171,20 +172,20 @@ const GroupDetail = () => {
         id: act.id || act._id,
         groupId: typeof act.groupId === 'object' ? act.groupId.id || act.groupId._id : act.groupId,
         userId: typeof act.userId === 'object' ? act.userId.id || act.userId._id : act.userId,
-        user: typeof act.user === 'object' 
+        user: typeof act.user === 'object'
           ? {
-              id: act.user.id || act.user._id,
-              name: act.user.name || 'Unknown',
-              email: act.user.email || '',
-              avatar: act.user.avatar,
-              createdAt: new Date(),
-            }
+            id: act.user.id || act.user._id,
+            name: act.user.name || 'Unknown',
+            email: act.user.email || '',
+            avatar: act.user.avatar,
+            createdAt: new Date(),
+          }
           : {
-              id: act.userId,
-              name: 'Unknown',
-              email: '',
-              createdAt: new Date(),
-            },
+            id: act.userId,
+            name: 'Unknown',
+            email: '',
+            createdAt: new Date(),
+          },
         action: act.action,
         description: act.description,
         metadata: act.metadata,
@@ -231,7 +232,7 @@ const GroupDetail = () => {
     }
   };
 
-  const isCreator = group && typeof group.createdBy === 'object' 
+  const isCreator = group && typeof group.createdBy === 'object'
     ? (group.createdBy.id || group.createdBy._id) === user?.id
     : group?.createdBy === user?.id;
 
@@ -292,6 +293,17 @@ const GroupDetail = () => {
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
+                  <AddMembersDialog
+                    groupId={group.id}
+                    groupName={group.name}
+                    onMembersAdded={fetchGroup}
+                    trigger={
+                      <DropdownMenuItem onSelect={(e) => e.preventDefault()}>
+                        <UserPlus className="mr-2 h-4 w-4" />
+                        Add Members
+                      </DropdownMenuItem>
+                    }
+                  />
                   <DropdownMenuItem
                     className="text-destructive focus:text-destructive"
                     onClick={handleDeleteClick}
@@ -331,18 +343,15 @@ const GroupDetail = () => {
           </div>
           <div className="bg-card rounded-xl border border-border p-4 shadow-card">
             <div className="flex items-center gap-3">
-              <div className={`flex h-10 w-10 items-center justify-center rounded-lg ${
-                isPositive ? 'bg-credit/10' : isNegative ? 'bg-debit/10' : 'bg-muted'
-              }`}>
-                <Receipt className={`h-5 w-5 ${
-                  isPositive ? 'text-credit' : isNegative ? 'text-debit' : 'text-muted-foreground'
-                }`} />
+              <div className={`flex h-10 w-10 items-center justify-center rounded-lg ${isPositive ? 'bg-credit/10' : isNegative ? 'bg-debit/10' : 'bg-muted'
+                }`}>
+                <Receipt className={`h-5 w-5 ${isPositive ? 'text-credit' : isNegative ? 'text-debit' : 'text-muted-foreground'
+                  }`} />
               </div>
               <div>
                 <p className="text-sm text-muted-foreground">Your Balance</p>
-                <p className={`text-xl font-bold ${
-                  isPositive ? 'text-credit' : isNegative ? 'text-debit' : 'text-foreground'
-                }`}>
+                <p className={`text-xl font-bold ${isPositive ? 'text-credit' : isNegative ? 'text-debit' : 'text-foreground'
+                  }`}>
                   {isPositive && '+'}
                   {group.userBalance !== 0 ? formatCurrency(group.userBalance) : 'Settled'}
                 </p>
@@ -374,21 +383,13 @@ const GroupDetail = () => {
                 </div>
               ) : expenses.length > 0 ? (
                 <div className="space-y-3">
-                  {expenses.map((expense) => {
-                    const expenseForItem = {
-                      ...expense,
-                      groupId: typeof expense.groupId === 'string' 
-                        ? expense.groupId 
-                        : (expense.groupId.id || expense.groupId._id || ''),
-                    };
-                    return (
-                      <ExpenseItem 
-                        key={expense.id} 
-                        expense={expenseForItem as any}
-                        className="border-0 shadow-none"
-                      />
-                    );
-                  })}
+                  {expenses.map((expense) => (
+                    <ExpenseItem
+                      key={expense.id}
+                      expense={expense}
+                      className="border-0 shadow-none"
+                    />
+                  ))}
                 </div>
               ) : (
                 <div className="text-center py-8">
@@ -404,9 +405,11 @@ const GroupDetail = () => {
             <div className="bg-card rounded-2xl border border-border p-6 shadow-card">
               <h2 className="text-lg font-semibold text-foreground mb-4">Who Owes Whom</h2>
               {user ? (
-                <DebtSummary 
-                  debts={group.debtRelations} 
+                <DebtSummary
+                  debts={group.debtRelations}
                   currentUserId={user.id}
+                  groupId={group.id}
+                  onSettlementCreated={fetchGroup}
                 />
               ) : (
                 <p className="text-center text-muted-foreground py-8">Loading...</p>

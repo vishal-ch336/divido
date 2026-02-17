@@ -16,7 +16,7 @@ router.use(protect);
 router.get('/', async (req, res) => {
   try {
     const { groupId } = req.query;
-    
+
     let query = {};
     if (groupId) {
       // Verify user is a member of the group
@@ -27,7 +27,7 @@ router.get('/', async (req, res) => {
           error: 'Group not found',
         });
       }
-      
+
       const isMember = group.members.some(
         (m) => m.userId.toString() === req.user._id.toString()
       ) || group.createdBy.toString() === req.user._id.toString();
@@ -38,7 +38,7 @@ router.get('/', async (req, res) => {
           error: 'Not authorized to access this group',
         });
       }
-      
+
       query.groupId = groupId;
     } else {
       // Get all groups user is a member of
@@ -147,24 +147,27 @@ router.post(
       await expense.populate('groupId', 'name');
 
       // Update group member balances
-      // This is a simplified version - you might want to recalculate all balances
+      // Balance change for each person = (amount they paid - amount they owe)
       if (splits && splits.length > 0) {
+        const paidById = (paidBy || req.user._id).toString();
+
         for (const split of splits) {
           const member = group.members.find(
             (m) => m.userId.toString() === split.userId.toString()
           );
+
           if (member) {
-            member.balance -= split.amount;
+            const memberId = member.userId.toString();
+            const amountPaid = (memberId === paidById) ? amount : 0;
+            const amountOwed = split.amount;
+
+            // Balance change = what they paid - what they owe
+            // Positive balance = they are owed money (creditor)
+            // Negative balance = they owe money (debtor)
+            member.balance += (amountPaid - amountOwed);
           }
         }
-        
-        const paidByMember = group.members.find(
-          (m) => m.userId.toString() === (paidBy || req.user._id).toString()
-        );
-        if (paidByMember) {
-          paidByMember.balance += amount;
-        }
-        
+
         await group.save();
       }
 

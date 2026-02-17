@@ -71,7 +71,7 @@ export function AddExpenseDialog({ groupId: propGroupId, trigger, onExpenseAdded
   const [loading, setLoading] = useState(false);
   const [loadingGroups, setLoadingGroups] = useState(false);
   const [loadingMembers, setLoadingMembers] = useState(false);
-  
+
   // Form state
   const [selectedGroupId, setSelectedGroupId] = useState<string>(propGroupId || '');
   const [amount, setAmount] = useState('');
@@ -84,7 +84,7 @@ export function AddExpenseDialog({ groupId: propGroupId, trigger, onExpenseAdded
   const [participants, setParticipants] = useState<string[]>([]);
   const [participantPercentages, setParticipantPercentages] = useState<Record<string, number>>({});
   const [participantShares, setParticipantShares] = useState<Record<string, number>>({});
-  
+
   // Data state
   const [groups, setGroups] = useState<Group[]>([]);
   const [selectedGroup, setSelectedGroup] = useState<Group | null>(null);
@@ -115,7 +115,7 @@ export function AddExpenseDialog({ groupId: propGroupId, trigger, onExpenseAdded
     try {
       const data = await groupsApi.getAll();
       setGroups(data || []);
-      
+
       // If propGroupId is provided, select it
       if (propGroupId && !selectedGroupId) {
         setSelectedGroupId(propGroupId);
@@ -135,27 +135,36 @@ export function AddExpenseDialog({ groupId: propGroupId, trigger, onExpenseAdded
 
   const fetchGroupDetails = async (groupId: string) => {
     if (!groupId) return;
-    
+
     setLoadingMembers(true);
+
     try {
       const group = await groupsApi.getById(groupId);
+
+      if (!group) {
+        throw new Error('Group not found');
+      }
+
       setSelectedGroup(group);
-      
+
       // Extract members from group
       const members = group?.members || [];
       setGroupMembers(members);
-      
+
       // Helper to get member ID (handles both _id and id formats)
       const getMemberId = (member: GroupMember): string => {
-        if (typeof member.userId === 'string') return member.userId;
-        const userId = member.userId as { id?: string; _id?: string; [key: string]: any };
-        return userId?.id || userId?._id || String(userId);
+        if (typeof member.userId === 'string') {
+          return member.userId;
+        }
+        const userId = member.userId as { id?: string; _id?: string;[key: string]: any };
+        const extractedId = userId?.id || userId?._id || String(userId);
+        return extractedId;
       };
-      
+
       // Set default participants to all members
       const memberIds = members.map((m: GroupMember) => getMemberId(m)).filter(Boolean);
       setParticipants(memberIds);
-      
+
       // Set default paidBy to current user if they're a member
       if (user && memberIds.includes(user.id)) {
         setPaidBy(user.id);
@@ -178,8 +187,8 @@ export function AddExpenseDialog({ groupId: propGroupId, trigger, onExpenseAdded
   };
 
   const toggleParticipant = (userId: string) => {
-    setParticipants(prev => 
-      prev.includes(userId) 
+    setParticipants(prev =>
+      prev.includes(userId)
         ? prev.filter(id => id !== userId)
         : [...prev, userId]
     );
@@ -369,7 +378,7 @@ export function AddExpenseDialog({ groupId: propGroupId, trigger, onExpenseAdded
       setSplitType('equal');
       const getMemberId = (m: GroupMember): string => {
         if (typeof m.userId === 'string') return m.userId;
-        const userId = m.userId as { id?: string; _id?: string; [key: string]: any };
+        const userId = m.userId as { id?: string; _id?: string;[key: string]: any };
         return userId?.id || userId?._id || String(userId);
       };
       setParticipants(groupMembers.map(getMemberId));
@@ -428,7 +437,7 @@ export function AddExpenseDialog({ groupId: propGroupId, trigger, onExpenseAdded
         <DialogHeader>
           <DialogTitle className="text-xl">Add New Expense</DialogTitle>
         </DialogHeader>
-        
+
         <form onSubmit={handleSubmit} className="space-y-6 mt-4">
           {/* Group Selection */}
           <div className="space-y-2">
@@ -445,9 +454,9 @@ export function AddExpenseDialog({ groupId: propGroupId, trigger, onExpenseAdded
                 </p>
               </div>
             ) : (
-              <Select 
-                value={selectedGroupId} 
-                onValueChange={setSelectedGroupId} 
+              <Select
+                value={selectedGroupId}
+                onValueChange={setSelectedGroupId}
                 required
                 disabled={!!propGroupId}
               >
@@ -530,10 +539,10 @@ export function AddExpenseDialog({ groupId: propGroupId, trigger, onExpenseAdded
             </div>
             <div className="space-y-2">
               <Label>Paid By *</Label>
-              <Select 
-                value={paidBy} 
-                onValueChange={setPaidBy} 
-                required 
+              <Select
+                value={paidBy}
+                onValueChange={setPaidBy}
+                required
                 disabled={loading || loadingMembers || !selectedGroupId}
               >
                 <SelectTrigger>
@@ -543,12 +552,12 @@ export function AddExpenseDialog({ groupId: propGroupId, trigger, onExpenseAdded
                   {groupMembers.map(member => {
                     const getMemberId = (): string => {
                       if (typeof member.userId === 'string') return member.userId;
-                      const userId = member.userId as { id?: string; _id?: string; name?: string; [key: string]: any };
+                      const userId = member.userId as { id?: string; _id?: string; name?: string;[key: string]: any };
                       return userId?.id || userId?._id || String(userId);
                     };
                     const getMemberName = (): string => {
                       if (typeof member.userId === 'string') return 'Unknown';
-                      const userId = member.userId as { id?: string; _id?: string; name?: string; [key: string]: any };
+                      const userId = member.userId as { id?: string; _id?: string; name?: string;[key: string]: any };
                       return userId?.name || 'Unknown';
                     };
                     const memberId = getMemberId();
@@ -596,8 +605,8 @@ export function AddExpenseDialog({ groupId: propGroupId, trigger, onExpenseAdded
                   disabled={loading}
                   className={cn(
                     'flex flex-col items-center gap-1 p-3 rounded-lg border-2 transition-all',
-                    splitType === type.value 
-                      ? 'border-primary bg-primary/5' 
+                    splitType === type.value
+                      ? 'border-primary bg-primary/5'
                       : 'border-border hover:border-primary/50',
                     loading && 'opacity-50 cursor-not-allowed'
                   )}
@@ -636,19 +645,19 @@ export function AddExpenseDialog({ groupId: propGroupId, trigger, onExpenseAdded
                     {groupMembers.map(member => {
                       const getMemberId = (): string => {
                         if (typeof member.userId === 'string') return member.userId;
-                        const userId = member.userId as { id?: string; _id?: string; name?: string; [key: string]: any };
+                        const userId = member.userId as { id?: string; _id?: string; name?: string;[key: string]: any };
                         return userId?.id || userId?._id || String(userId);
                       };
                       const getMemberName = (): string => {
                         if (typeof member.userId === 'string') return 'Unknown';
-                        const userId = member.userId as { id?: string; _id?: string; name?: string; [key: string]: any };
+                        const userId = member.userId as { id?: string; _id?: string; name?: string;[key: string]: any };
                         return userId?.name || 'Unknown';
                       };
                       const memberId = getMemberId();
                       const memberName = getMemberName();
                       const isParticipant = participants.includes(memberId);
                       const split = splits?.find(s => s.userId === memberId);
-                      
+
                       return (
                         <div key={memberId} className="space-y-2">
                           <label className="flex items-center justify-between p-2 rounded-lg hover:bg-muted/50 cursor-pointer">
@@ -666,7 +675,7 @@ export function AddExpenseDialog({ groupId: propGroupId, trigger, onExpenseAdded
                               </span>
                             )}
                           </label>
-                          
+
                           {/* Percentage input for percentage split */}
                           {isParticipant && splitType === 'percentage' && (
                             <div className="ml-8">
@@ -690,7 +699,7 @@ export function AddExpenseDialog({ groupId: propGroupId, trigger, onExpenseAdded
                               <span className="text-xs text-muted-foreground ml-2">%</span>
                             </div>
                           )}
-                          
+
                           {/* Shares input for share split */}
                           {isParticipant && splitType === 'share' && (
                             <div className="ml-8">
@@ -716,15 +725,15 @@ export function AddExpenseDialog({ groupId: propGroupId, trigger, onExpenseAdded
                       );
                     })}
                   </div>
-                  
+
                   {hasSplitError && (
                     <p className="text-sm text-destructive text-center">
-                      {splitType === 'percentage' 
+                      {splitType === 'percentage'
                         ? 'Percentages must add up to 100%'
                         : 'Please enter valid shares for all participants'}
                     </p>
                   )}
-                  
+
                   {splits && splits.length > 0 && !hasSplitError && (
                     <div className="text-sm text-muted-foreground text-center space-y-1">
                       <p>
@@ -744,18 +753,18 @@ export function AddExpenseDialog({ groupId: propGroupId, trigger, onExpenseAdded
 
           {/* Submit */}
           <div className="flex gap-3 pt-2">
-            <Button 
-              type="button" 
-              variant="outline" 
-              className="flex-1" 
+            <Button
+              type="button"
+              variant="outline"
+              className="flex-1"
               onClick={() => handleOpenChange(false)}
               disabled={loading}
             >
               Cancel
             </Button>
-            <Button 
-              type="submit" 
-              variant="accent" 
+            <Button
+              type="submit"
+              variant="accent"
               className="flex-1"
               disabled={loading || !selectedGroupId || hasSplitError}
             >

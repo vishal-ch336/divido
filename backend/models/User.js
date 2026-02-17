@@ -26,12 +26,31 @@ const userSchema = new mongoose.Schema({
     type: String,
     default: null,
   },
+  phone: {
+    type: String,
+    default: null,
+    trim: true,
+  },
+  notifications: {
+    email: {
+      type: Boolean,
+      default: true,
+    },
+    push: {
+      type: Boolean,
+      default: true,
+    },
+    reminders: {
+      type: Boolean,
+      default: true,
+    },
+  },
 }, {
   timestamps: true,
 });
 
 // Hash password before saving
-userSchema.pre('save', async function(next) {
+userSchema.pre('save', async function (next) {
   if (!this.isModified('password')) {
     next();
   }
@@ -40,7 +59,7 @@ userSchema.pre('save', async function(next) {
 });
 
 // Method to compare password
-userSchema.methods.matchPassword = async function(enteredPassword) {
+userSchema.methods.matchPassword = async function (enteredPassword) {
   return await bcrypt.compare(enteredPassword, this.password);
 };
 

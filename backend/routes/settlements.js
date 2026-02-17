@@ -17,7 +17,7 @@ router.use(protect);
 router.get('/', async (req, res) => {
   try {
     const { groupId, status } = req.query;
-    
+
     let query = {
       $or: [
         { fromUser: req.user._id },
@@ -34,7 +34,7 @@ router.get('/', async (req, res) => {
           error: 'Group not found',
         });
       }
-      
+
       const isMember = group.members.some(
         (m) => m.userId.toString() === req.user._id.toString()
       ) || group.createdBy.toString() === req.user._id.toString();
@@ -45,7 +45,7 @@ router.get('/', async (req, res) => {
           error: 'Not authorized to access this group',
         });
       }
-      
+
       query.groupId = groupId;
     } else {
       // Get all groups user is a member of
@@ -135,12 +135,12 @@ router.get('/calculate', async (req, res) => {
         (m) => m.userId.toString() === memberUserId.toString()
       );
       const balance = memberData?.balance || 0;
-      
+
       // Get user info (already populated)
       const userInfo = typeof member.userId === 'object' && member.userId.name
         ? member.userId
         : { _id: memberUserId, name: 'Unknown', email: '', avatar: null };
-      
+
       balances.push({
         userId: memberUserId,
         user: userInfo,
@@ -162,7 +162,7 @@ router.get('/calculate', async (req, res) => {
       const debtor = debtors[debtorIndex];
 
       const amount = Math.min(creditor.balance, Math.abs(debtor.balance));
-      
+
       if (amount > 0.01) {
         suggestedSettlements.push({
           fromUser: debtor.userId,
@@ -328,23 +328,53 @@ router.patch('/:id/confirm', async (req, res) => {
     // Update group member balances
     const group = await Group.findById(settlement.groupId);
     if (group) {
-      // Reduce fromUser's balance (they paid)
+      console.log('=== SETTLEMENT CONFIRMATION DEBUG ===');
+      console.log('Settlement amount:', settlement.amount);
+      console.log('From user:', settlement.fromUser.toString());
+      console.log('To user:', settlement.toUser.toString());
+      console.log('Group members BEFORE update:', group.members.map(m => ({
+        userId: m.userId.toString(),
+        balance: m.balance
+      })));
+
+      // When fromUser pays toUser:
+      // - fromUser's debt decreases, so their balance increases
+      // - toUser's credit decreases, so their balance decreases
+
       const fromMember = group.members.find(
         (m) => m.userId.toString() === settlement.fromUser.toString()
       );
       if (fromMember) {
-        fromMember.balance -= settlement.amount;
+        console.log(`Updating fromUser balance: ${fromMember.balance} + ${settlement.amount}`);
+        fromMember.balance += settlement.amount;
+      } else {
+        console.log('WARNING: fromUser not found in group.members!');
       }
 
-      // Increase toUser's balance (they received)
       const toMember = group.members.find(
         (m) => m.userId.toString() === settlement.toUser.toString()
       );
       if (toMember) {
-        toMember.balance += settlement.amount;
+        console.log(`Updating toUser balance: ${toMember.balance} - ${settlement.amount}`);
+        toMember.balance -= settlement.amount;
+      } else {
+        console.log('WARNING: toUser not found in group.members!');
       }
 
       await group.save();
+
+      console.log('Group members AFTER update:', group.members.map(m => ({
+        userId: m.userId.toString(),
+        balance: m.balance
+      })));
+
+      // Verify the save by fetching fresh from DB
+      const freshGroup = await Group.findById(settlement.groupId);
+      console.log('Fresh from DB (verification):', freshGroup.members.map(m => ({
+        userId: m.userId.toString(),
+        balance: m.balance
+      })));
+      console.log('=== END DEBUG ===');
     }
 
     await settlement.populate('fromUser', 'name email avatar');

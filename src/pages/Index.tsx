@@ -16,12 +16,13 @@ import { useToast } from '@/hooks/use-toast';
 import { ApiError } from '@/lib/api';
 import { formatCurrency } from '@/lib/format';
 import { Receipt, Users, ArrowLeftRight, Plus, ChevronRight, TrendingUp, Loader2 } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { DebtRelation, ActivityLog, Expense, Group } from '@/types';
 
 const Index = () => {
   const { user } = useAuth();
   const { toast } = useToast();
+  const location = useLocation();
   const [loading, setLoading] = useState(true);
   const [dashboardData, setDashboardData] = useState<{
     totalOwed: number;
@@ -40,13 +41,31 @@ const Index = () => {
   useEffect(() => {
     fetchDashboardData();
     fetchActivities();
+  }, [location.pathname]); // Refetch when navigating to dashboard
+
+  // Refetch data when window/tab becomes visible (e.g., returning from Settlements page)
+  useEffect(() => {
+    const handleFocus = () => {
+      fetchDashboardData();
+      fetchActivities();
+    };
+
+    window.addEventListener('focus', handleFocus);
+    return () => window.removeEventListener('focus', handleFocus);
   }, []);
 
   const fetchDashboardData = async () => {
     setLoading(true);
     try {
+      console.log('🔄 Fetching dashboard data...');
       const data = await dashboardApi.getSummary();
-      
+      console.log('📊 Dashboard data received:', {
+        totalOwed: data.totalOwed,
+        totalOwe: data.totalOwe,
+        debtRelationsCount: data.debtRelations?.length || 0,
+        debtRelations: data.debtRelations
+      });
+
       // Transform debt relations
       const debtRelations: DebtRelation[] = (data.debtRelations || []).map((dr: any) => ({
         fromUser: {
@@ -85,20 +104,20 @@ const Index = () => {
         groupId: typeof exp.groupId === 'object' ? exp.groupId.id || exp.groupId._id : exp.groupId,
         description: exp.description,
         amount: exp.amount,
-        paidBy: typeof exp.paidBy === 'object' 
+        paidBy: typeof exp.paidBy === 'object'
           ? {
-              id: exp.paidBy.id || exp.paidBy._id,
-              name: exp.paidBy.name || 'Unknown',
-              email: exp.paidBy.email || '',
-              avatar: exp.paidBy.avatar,
-              createdAt: new Date(),
-            }
+            id: exp.paidBy.id || exp.paidBy._id,
+            name: exp.paidBy.name || 'Unknown',
+            email: exp.paidBy.email || '',
+            avatar: exp.paidBy.avatar,
+            createdAt: new Date(),
+          }
           : {
-              id: exp.paidBy,
-              name: 'Unknown',
-              email: '',
-              createdAt: new Date(),
-            },
+            id: exp.paidBy,
+            name: 'Unknown',
+            email: '',
+            createdAt: new Date(),
+          },
         category: exp.category,
         date: exp.date ? new Date(exp.date) : new Date(),
         createdAt: exp.createdAt ? new Date(exp.createdAt) : new Date(),
@@ -108,6 +127,8 @@ const Index = () => {
         isFlagged: exp.isFlagged || false,
         isRecurring: exp.isRecurring || false,
       }));
+
+      console.log('✅ Transformed debtRelations:', debtRelations);
 
       setDashboardData({
         totalOwed: data.totalOwed || 0,
@@ -120,6 +141,8 @@ const Index = () => {
         recentExpenses,
         debtRelations,
       });
+
+      console.log('💾 Dashboard state updated with', debtRelations.length, 'debt relations');
     } catch (error) {
       console.error('Error fetching dashboard data:', error);
       toast({
@@ -140,20 +163,20 @@ const Index = () => {
         id: act.id || act._id,
         groupId: typeof act.groupId === 'object' ? act.groupId.id || act.groupId._id : act.groupId,
         userId: typeof act.userId === 'object' ? act.userId.id || act.userId._id : act.userId,
-        user: typeof act.user === 'object' 
+        user: typeof act.user === 'object'
           ? {
-              id: act.user.id || act.user._id,
-              name: act.user.name || 'Unknown',
-              email: act.user.email || '',
-              avatar: act.user.avatar,
-              createdAt: new Date(),
-            }
+            id: act.user.id || act.user._id,
+            name: act.user.name || 'Unknown',
+            email: act.user.email || '',
+            avatar: act.user.avatar,
+            createdAt: new Date(),
+          }
           : {
-              id: act.userId,
-              name: 'Unknown',
-              email: '',
-              createdAt: new Date(),
-            },
+            id: act.userId,
+            name: 'Unknown',
+            email: '',
+            createdAt: new Date(),
+          },
         action: act.action,
         description: act.description,
         metadata: act.metadata,
@@ -284,9 +307,9 @@ const Index = () => {
               <div className="space-y-3">
                 {groups.length > 0 ? (
                   groups.map((group, index) => (
-                    <GroupCard 
-                      key={group.id} 
-                      group={group} 
+                    <GroupCard
+                      key={group.id}
+                      group={group}
                       userBalance={group.userBalance || 0}
                       className={`animate-slide-up stagger-${index + 1}`}
                     />
@@ -310,22 +333,13 @@ const Index = () => {
               </div>
               <div className="space-y-3">
                 {recentExpenses.length > 0 ? (
-                  recentExpenses.map((expense, index) => {
-                    // Transform expense for ExpenseItem
-                    const expenseForItem = {
-                      ...expense,
-                      groupId: typeof expense.groupId === 'string' 
-                        ? expense.groupId 
-                        : (expense.groupId.id || expense.groupId._id || ''),
-                    };
-                    return (
-                      <ExpenseItem 
-                        key={expense.id} 
-                        expense={expenseForItem as any}
-                        className={`animate-slide-up stagger-${index + 1}`}
-                      />
-                    );
-                  })
+                  recentExpenses.map((expense, index) => (
+                    <ExpenseItem
+                      key={expense.id}
+                      expense={expense as any}
+                      className={`animate-slide-up stagger-${index + 1}`}
+                    />
+                  ))
                 ) : (
                   <p className="text-center text-muted-foreground py-8">No recent expenses</p>
                 )}
@@ -353,9 +367,12 @@ const Index = () => {
             <div className="bg-card rounded-2xl border border-border p-6 shadow-card">
               <h2 className="text-lg font-semibold text-foreground mb-4">Settlement Summary</h2>
               {user ? (
-                <DebtSummary 
-                  debts={debtRelations} 
+                <DebtSummary
+                  key={JSON.stringify(debtRelations.map(d => d.amount))}
+                  debts={debtRelations}
                   currentUserId={user.id}
+                  groupId=""
+                  onSettlementCreated={fetchDashboardData}
                 />
               ) : (
                 <p className="text-center text-muted-foreground py-8">Loading...</p>

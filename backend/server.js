@@ -9,6 +9,7 @@ import expenseRoutes from './routes/expenses.js';
 import activityRoutes from './routes/activity.js';
 import dashboardRoutes from './routes/dashboard.js';
 import settlementRoutes from './routes/settlements.js';
+import notificationRoutes from './routes/notifications.js';
 
 // Load environment variables
 dotenv.config();
@@ -35,12 +36,13 @@ app.use('/api/expenses', expenseRoutes);
 app.use('/api/activity', activityRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/settlements', settlementRoutes);
+app.use('/api/notifications', notificationRoutes);
 
 // Health check (works even if DB is not connected)
 app.get('/api/health', (req, res) => {
   const dbStatus = mongoose.connection.readyState === 1 ? 'connected' : 'disconnected';
-  res.json({ 
-    success: true, 
+  res.json({
+    success: true,
     message: 'Server is running',
     database: dbStatus,
     timestamp: new Date().toISOString()

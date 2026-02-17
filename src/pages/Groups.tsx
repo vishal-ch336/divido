@@ -7,12 +7,13 @@ import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { AddMembersDialog } from '@/components/groups/AddMembersDialog';
 import { groupsApi } from '@/lib/api';
 import { useAuth } from '@/hooks/useAuth';
 import { useToast } from '@/hooks/use-toast';
 import { ApiError } from '@/lib/api';
 import { formatCurrency } from '@/lib/format';
-import { Plus, Search, Users, Loader2, X, User, Trash2, MoreVertical, Receipt } from 'lucide-react';
+import { Plus, Search, Users, Loader2, X, User, Trash2, MoreVertical, Receipt, UserPlus } from 'lucide-react';
 import { Group } from '@/types';
 import {
   DropdownMenu,
@@ -98,7 +99,7 @@ const Groups = () => {
 
   const handleAddMember = () => {
     const email = memberEmail.trim().toLowerCase();
-    
+
     if (!email) {
       toast({
         title: 'Validation Error',
@@ -379,18 +380,18 @@ const Groups = () => {
                 </div>
 
                 <div className="flex gap-3 pt-2">
-                  <Button 
-                    type="button" 
-                    variant="outline" 
-                    className="flex-1" 
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="flex-1"
                     onClick={() => handleOpenChange(false)}
                     disabled={loading}
                   >
                     Cancel
                   </Button>
-                  <Button 
-                    type="submit" 
-                    variant="accent" 
+                  <Button
+                    type="submit"
+                    variant="accent"
                     className="flex-1"
                     disabled={loading || !newGroupName.trim()}
                   >
@@ -432,18 +433,18 @@ const Groups = () => {
           <div className="space-y-4">
             {filteredGroups.map((group, index) => {
               // Check if user is creator (for delete permission)
-              const isCreator = typeof group.createdBy === 'object' 
+              const isCreator = typeof group.createdBy === 'object'
                 ? (group.createdBy.id || group.createdBy._id) === user?.id
                 : group.createdBy === user?.id;
-              
+
               // Get debts involving current user
-              const userDebts = group.debtRelations?.filter(d => 
+              const userDebts = group.debtRelations?.filter(d =>
                 (d.fromUser.id === user?.id || d.toUser.id === user?.id)
               ) || [];
-              
+
               const isPositive = (group.userBalance || 0) > 0;
               const isNegative = (group.userBalance || 0) < 0;
-              
+
               return (
                 <Link
                   key={group.id}
@@ -480,6 +481,17 @@ const Groups = () => {
                                   </Button>
                                 </DropdownMenuTrigger>
                                 <DropdownMenuContent align="end">
+                                  <AddMembersDialog
+                                    groupId={group.id}
+                                    groupName={group.name}
+                                    onMembersAdded={fetchGroups}
+                                    trigger={
+                                      <DropdownMenuItem onSelect={(e) => e.preventDefault()}>
+                                        <UserPlus className="mr-2 h-4 w-4" />
+                                        Add Members
+                                      </DropdownMenuItem>
+                                    }
+                                  />
                                   <DropdownMenuItem
                                     className="text-destructive focus:text-destructive"
                                     onClick={(e) => {
@@ -507,18 +519,17 @@ const Groups = () => {
                               {formatCurrency(group.totalExpenses)}
                             </span>
                           </div>
-                          <div className={`text-sm font-semibold px-3 py-1 rounded-full ${
-                            isPositive ? 'bg-credit-light text-credit' :
-                            isNegative ? 'bg-debit-light text-debit' :
-                            'bg-muted text-muted-foreground'
-                          }`}>
+                          <div className={`text-sm font-semibold px-3 py-1 rounded-full ${isPositive ? 'bg-credit-light text-credit' :
+                              isNegative ? 'bg-debit-light text-debit' :
+                                'bg-muted text-muted-foreground'
+                            }`}>
                             {isPositive && '+'}
                             {(group.userBalance || 0) !== 0 ? formatCurrency(group.userBalance || 0) : 'Settled'}
                           </div>
                         </div>
                       </div>
                     </div>
-                    
+
                     {/* Debt Summary Preview */}
                     {userDebts.length > 0 && (
                       <div className="mt-4 pt-4 border-t border-border">
@@ -530,11 +541,10 @@ const Groups = () => {
                             return (
                               <div
                                 key={debtIndex}
-                                className={`flex items-center justify-between p-3 rounded-lg ${
-                                  isYouOwe 
-                                    ? 'bg-debit-light/50 border border-debit/10' 
+                                className={`flex items-center justify-between p-3 rounded-lg ${isYouOwe
+                                    ? 'bg-debit-light/50 border border-debit/10'
                                     : 'bg-credit-light/50 border border-credit/10'
-                                }`}
+                                  }`}
                               >
                                 <div className="flex items-center gap-3">
                                   <User className="h-4 w-4 text-muted-foreground" />
@@ -542,9 +552,8 @@ const Groups = () => {
                                     {isYouOwe ? 'You owe' : 'Owes you'}: <strong>{otherUser.name}</strong>
                                   </span>
                                 </div>
-                                <span className={`text-sm font-semibold ${
-                                  isYouOwe ? 'text-debit' : 'text-credit'
-                                }`}>
+                                <span className={`text-sm font-semibold ${isYouOwe ? 'text-debit' : 'text-credit'
+                                  }`}>
                                   {formatCurrency(debt.amount)}
                                 </span>
                               </div>

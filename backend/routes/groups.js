@@ -31,79 +31,110 @@ router.get('/', async (req, res) => {
       groups.map(async (group) => {
         await group.populate('members.userId', 'name email avatar');
         await group.populate('createdBy', 'name email avatar');
-        
+
         const expenses = await Expense.find({ groupId: group._id });
         const totalExpenses = expenses.reduce((sum, exp) => sum + exp.amount, 0);
-        
+
         const currentUserMemberData = group.members.find(
           (m) => m.userId._id.toString() === req.user._id.toString()
         );
 
-        // Calculate debt relations for this group
-        const allMembers = [
-          {
-            userId: group.createdBy,
-            balance: 0,
-          },
-          ...group.members,
-        ];
+        // Calculate detailed debts from expenses (transaction-based, not minimized)
+        // This shows who actually owes whom based on expense transactions
+        const detailedDebts = new Map(); // key: "fromUserId-toUserId"
 
-        const balances = [];
-        for (const member of allMembers) {
-          const memberUserId = member.userId._id || member.userId;
-          const memberBalanceData = group.members.find(
-            (m) => m.userId.toString() === memberUserId.toString()
-          );
-          const balance = memberBalanceData?.balance || 0;
-          
-          const userInfo = typeof member.userId === 'object' && member.userId.name
-            ? member.userId
-            : { _id: memberUserId, name: 'Unknown', email: '', avatar: null };
-          
-          balances.push({
-            userId: memberUserId,
-            user: userInfo,
-            balance,
-          });
+        for (const expense of expenses) {
+          const paidById = (expense.paidBy._id || expense.paidBy).toString();
+
+          for (const split of expense.splits || []) {
+            const userId = (split.userId._id || split.userId).toString();
+
+            // If this person didn't pay, they owe the payer
+            if (userId !== paidById) {
+              const key = `${userId}-${paidById}`;
+
+              if (!detailedDebts.has(key)) {
+                detailedDebts.set(key, {
+                  fromUserId: userId,
+                  toUserId: paidById,
+                  amount: 0,
+                });
+              }
+
+              const debt = detailedDebts.get(key);
+              debt.amount += split.amount;
+            }
+          }
         }
 
-        // Calculate debts: who owes whom
-        const debtRelations = [];
-        const creditors = balances.filter(b => b.balance > 0.01).sort((a, b) => b.balance - a.balance);
-        const debtors = balances.filter(b => b.balance < -0.01).sort((a, b) => a.balance - b.balance);
+        // Consolidate reverse debts (if A owes B ₹500 and B owes A ₹100, result is A owes B ₹400)
+        const consolidatedDebts = new Map();
 
-        let creditorIndex = 0;
-        let debtorIndex = 0;
+        for (const [key, debt] of detailedDebts.entries()) {
+          const reverseKey = `${debt.toUserId}-${debt.fromUserId}`;
 
-        while (creditorIndex < creditors.length && debtorIndex < debtors.length) {
-          const creditor = creditors[creditorIndex];
-          const debtor = debtors[debtorIndex];
+          if (consolidatedDebts.has(reverseKey)) {
+            // There's a reverse debt - consolidate
+            const reverseDebt = consolidatedDebts.get(reverseKey);
+            const netAmount = reverseDebt.amount - debt.amount;
 
-          const amount = Math.min(creditor.balance, Math.abs(debtor.balance));
-          
-          if (amount > 0.01) {
-            debtRelations.push({
-              fromUser: {
-                id: debtor.user._id || debtor.userId,
-                name: debtor.user.name || 'Unknown',
-                email: debtor.user.email || '',
-                avatar: debtor.user.avatar,
-              },
-              toUser: {
-                id: creditor.user._id || creditor.userId,
-                name: creditor.user.name || 'Unknown',
-                email: creditor.user.email || '',
-                avatar: creditor.user.avatar,
-              },
-              amount: parseFloat(amount.toFixed(2)),
-            });
+            if (netAmount > 0.01) {
+              // Keep reverse debt with reduced amount
+              reverseDebt.amount = netAmount;
+            } else if (netAmount < -0.01) {
+              // Flip to this direction
+              consolidatedDebts.delete(reverseKey);
+              consolidatedDebts.set(key, {
+                ...debt,
+                amount: Math.abs(netAmount),
+              });
+            } else {
+              // Exactly cancel - remove both
+              consolidatedDebts.delete(reverseKey);
+            }
+          } else {
+            // No reverse debt exists, add this one
+            consolidatedDebts.set(key, debt);
           }
+        }
 
-          creditor.balance -= amount;
-          debtor.balance += amount;
+        // Convert to debtRelations with user info
+        const debtRelations = [];
+        for (const debt of consolidatedDebts.values()) {
+          if (debt.amount > 0.01) {
+            // Find user info from group members
+            const fromMember = group.members.find(
+              (m) => (m.userId._id || m.userId).toString() === debt.fromUserId
+            );
+            const toMember = group.members.find(
+              (m) => (m.userId._id || m.userId).toString() === debt.toUserId
+            );
 
-          if (creditor.balance < 0.01) creditorIndex++;
-          if (Math.abs(debtor.balance) < 0.01) debtorIndex++;
+            if (fromMember && toMember) {
+              const fromUser = typeof fromMember.userId === 'object' && fromMember.userId.name
+                ? fromMember.userId
+                : { _id: debt.fromUserId, name: 'Unknown', email: '', avatar: null };
+              const toUser = typeof toMember.userId === 'object' && toMember.userId.name
+                ? toMember.userId
+                : { _id: debt.toUserId, name: 'Unknown', email: '', avatar: null };
+
+              debtRelations.push({
+                fromUser: {
+                  id: fromUser._id || debt.fromUserId,
+                  name: fromUser.name || 'Unknown',
+                  email: fromUser.email || '',
+                  avatar: fromUser.avatar,
+                },
+                toUser: {
+                  id: toUser._id || debt.toUserId,
+                  name: toUser.name || 'Unknown',
+                  email: toUser.email || '',
+                  avatar: toUser.avatar,
+                },
+                amount: parseFloat(debt.amount.toFixed(2)),
+              });
+            }
+          }
         }
 
         return {
@@ -162,76 +193,107 @@ router.get('/:id', async (req, res) => {
       });
     }
 
-    // Calculate debt relations for this group
-    const allMembers = [
-      {
-        userId: group.createdBy,
-        balance: 0,
-      },
-      ...group.members,
-    ];
-
-    const balances = [];
-    for (const member of allMembers) {
-      const memberUserId = member.userId._id || member.userId;
-      const memberData = group.members.find(
-        (m) => m.userId.toString() === memberUserId.toString()
-      );
-      const balance = memberData?.balance || 0;
-      
-      const userInfo = typeof member.userId === 'object' && member.userId.name
-        ? member.userId
-        : { _id: memberUserId, name: 'Unknown', email: '', avatar: null };
-      
-      balances.push({
-        userId: memberUserId,
-        user: userInfo,
-        balance,
-      });
-    }
-
-    // Calculate debts: who owes whom
-    const debtRelations = [];
-    const creditors = balances.filter(b => b.balance > 0.01).sort((a, b) => b.balance - a.balance);
-    const debtors = balances.filter(b => b.balance < -0.01).sort((a, b) => a.balance - b.balance);
-
-    let creditorIndex = 0;
-    let debtorIndex = 0;
-
-    while (creditorIndex < creditors.length && debtorIndex < debtors.length) {
-      const creditor = creditors[creditorIndex];
-      const debtor = debtors[debtorIndex];
-
-      const amount = Math.min(creditor.balance, Math.abs(debtor.balance));
-      
-      if (amount > 0.01) {
-        debtRelations.push({
-          fromUser: {
-            id: debtor.user._id || debtor.userId,
-            name: debtor.user.name || 'Unknown',
-            email: debtor.user.email || '',
-            avatar: debtor.user.avatar,
-          },
-          toUser: {
-            id: creditor.user._id || creditor.userId,
-            name: creditor.user.name || 'Unknown',
-            email: creditor.user.email || '',
-            avatar: creditor.user.avatar,
-          },
-          amount: parseFloat(amount.toFixed(2)),
-        });
-      }
-
-      creditor.balance -= amount;
-      debtor.balance += amount;
-
-      if (creditor.balance < 0.01) creditorIndex++;
-      if (Math.abs(debtor.balance) < 0.01) debtorIndex++;
-    }
-
-    // Get total expenses for the group
+    // Get all expenses for the group to calculate detailed debts
     const expenses = await Expense.find({ groupId: group._id });
     const totalExpenses = expenses.reduce((sum, exp) => sum + exp.amount, 0);
+
+    // Calculate detailed debts from expenses (transaction-based, not minimized)
+    // This shows who actually owes whom based on expense transactions
+    const detailedDebts = new Map(); // key: "fromUserId-toUserId"
+
+    for (const expense of expenses) {
+      const paidById = (expense.paidBy._id || expense.paidBy).toString();
+
+      for (const split of expense.splits || []) {
+        const userId = (split.userId._id || split.userId).toString();
+
+        // If this person didn't pay, they owe the payer
+        if (userId !== paidById) {
+          const key = `${userId}-${paidById}`;
+
+          if (!detailedDebts.has(key)) {
+            detailedDebts.set(key, {
+              fromUserId: userId,
+              toUserId: paidById,
+              amount: 0,
+            });
+          }
+
+          const debt = detailedDebts.get(key);
+          debt.amount += split.amount;
+        }
+      }
+    }
+
+    // Consolidate reverse debts (if A owes B ₹500 and B owes A ₹100, result is A owes B ₹400)
+    const consolidatedDebts = new Map();
+
+    for (const [key, debt] of detailedDebts.entries()) {
+      const reverseKey = `${debt.toUserId}-${debt.fromUserId}`;
+
+      if (consolidatedDebts.has(reverseKey)) {
+        // There's a reverse debt - consolidate
+        const reverseDebt = consolidatedDebts.get(reverseKey);
+        const netAmount = reverseDebt.amount - debt.amount;
+
+        if (netAmount > 0.01) {
+          // Keep reverse debt with reduced amount
+          reverseDebt.amount = netAmount;
+        } else if (netAmount < -0.01) {
+          // Flip to this direction
+          consolidatedDebts.delete(reverseKey);
+          consolidatedDebts.set(key, {
+            ...debt,
+            amount: Math.abs(netAmount),
+          });
+        } else {
+          // Exactly cancel - remove both
+          consolidatedDebts.delete(reverseKey);
+        }
+      } else {
+        // No reverse debt exists, add this one
+        consolidatedDebts.set(key, debt);
+      }
+    }
+
+    // Convert to debtRelations with user info
+    const debtRelations = [];
+    for (const debt of consolidatedDebts.values()) {
+      if (debt.amount > 0.01) {
+        // Find user info from group members
+        const fromMember = group.members.find(
+          (m) => (m.userId._id || m.userId).toString() === debt.fromUserId
+        );
+        const toMember = group.members.find(
+          (m) => (m.userId._id || m.userId).toString() === debt.toUserId
+        );
+
+        if (fromMember && toMember) {
+          const fromUser = typeof fromMember.userId === 'object' && fromMember.userId.name
+            ? fromMember.userId
+            : { _id: debt.fromUserId, name: 'Unknown', email: '', avatar: null };
+          const toUser = typeof toMember.userId === 'object' && toMember.userId.name
+            ? toMember.userId
+            : { _id: debt.toUserId, name: 'Unknown', email: '', avatar: null };
+
+          debtRelations.push({
+            fromUser: {
+              id: fromUser._id || debt.fromUserId,
+              name: fromUser.name || 'Unknown',
+              email: fromUser.email || '',
+              avatar: fromUser.avatar,
+            },
+            toUser: {
+              id: toUser._id || debt.toUserId,
+              name: toUser.name || 'Unknown',
+              email: toUser.email || '',
+              avatar: toUser.avatar,
+            },
+            amount: parseFloat(debt.amount.toFixed(2)),
+          });
+        }
+      }
+    }
 
     res.json({
       success: true,
@@ -284,7 +346,7 @@ router.post(
       if (memberEmails && Array.isArray(memberEmails) && memberEmails.length > 0) {
         // Remove duplicates and normalize emails (lowercase, trim)
         const uniqueEmails = [...new Set(memberEmails.map((email) => email.trim().toLowerCase()).filter(email => email.length > 0))];
-        
+
         // Remove creator's email if included
         const creatorEmail = req.user.email.toLowerCase();
         const filteredEmails = uniqueEmails.filter(email => email !== creatorEmail);
@@ -379,6 +441,149 @@ router.post(
   }
 );
 
+// @route   POST /api/groups/:id/members
+// @desc    Add members to an existing group
+// @access  Private (only members can add other members)
+router.post(
+  '/:id/members',
+  [
+    body('memberEmails').isArray({ min: 1 }).withMessage('At least one email is required'),
+    body('memberEmails.*').trim().isEmail().normalizeEmail().withMessage('Invalid email format'),
+  ],
+  async (req, res) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({
+          success: false,
+          error: errors.array()[0].msg,
+        });
+      }
+
+      const { memberEmails } = req.body;
+      const group = await Group.findById(req.params.id);
+
+      if (!group) {
+        return res.status(404).json({
+          success: false,
+          error: 'Group not found',
+        });
+      }
+
+      // Check if user is a member of the group
+      const isMember = group.members.some(
+        (m) => m.userId.toString() === req.user._id.toString()
+      ) || group.createdBy.toString() === req.user._id.toString();
+
+      if (!isMember) {
+        return res.status(403).json({
+          success: false,
+          error: 'Not authorized to add members to this group',
+        });
+      }
+
+      // Remove duplicates and normalize emails (lowercase, trim)
+      const uniqueEmails = [...new Set(memberEmails.map((email) => email.trim().toLowerCase()).filter(email => email.length > 0))];
+
+      // Remove creator's email if included
+      const creatorEmail = req.user.email.toLowerCase();
+      const filteredEmails = uniqueEmails.filter(email => email !== creatorEmail);
+
+      if (filteredEmails.length === 0) {
+        return res.status(400).json({
+          success: false,
+          error: 'No valid emails to add',
+        });
+      }
+
+      // Find users by email and check for duplicates
+      const notFoundEmails = [];
+      const alreadyMemberEmails = [];
+      const newMembers = [];
+
+      for (const email of filteredEmails) {
+        const emailTrimmed = email.trim().toLowerCase();
+        const foundUser = await User.findOne({ email: emailTrimmed });
+
+        if (!foundUser) {
+          notFoundEmails.push(emailTrimmed);
+        } else {
+          // Check if user is already a member
+          const isAlreadyMember = group.members.some(
+            (m) => m.userId.toString() === foundUser._id.toString()
+          );
+
+          if (isAlreadyMember) {
+            alreadyMemberEmails.push(emailTrimmed);
+          } else {
+            newMembers.push({
+              userId: foundUser._id,
+              role: 'member',
+              balance: 0,
+            });
+          }
+        }
+      }
+
+      // Report errors if any
+      if (notFoundEmails.length > 0) {
+        return res.status(400).json({
+          success: false,
+          error: `The following emails are not registered: ${notFoundEmails.join(', ')}`,
+        });
+      }
+
+      if (alreadyMemberEmails.length > 0 && newMembers.length === 0) {
+        return res.status(400).json({
+          success: false,
+          error: `All provided emails are already members of this group`,
+        });
+      }
+
+      if (newMembers.length === 0) {
+        return res.status(400).json({
+          success: false,
+          error: 'No new members to add',
+        });
+      }
+
+      // Add new members to the group
+      group.members.push(...newMembers);
+      await group.save();
+
+      // Populate the group data
+      await group.populate('createdBy', 'name email avatar');
+      await group.populate('members.userId', 'name email avatar');
+
+      // Log activity for each member added
+      for (const member of newMembers) {
+        const memberUser = await User.findById(member.userId);
+        if (memberUser) {
+          await ActivityLog.create({
+            groupId: group._id,
+            userId: req.user._id,
+            action: 'member_added',
+            description: `${memberUser.name} was added to the group by ${req.user.name}`,
+          });
+        }
+      }
+
+      res.json({
+        success: true,
+        data: group,
+        message: `Successfully added ${newMembers.length} member${newMembers.length > 1 ? 's' : ''} to the group`,
+      });
+    } catch (error) {
+      console.error('Add members error:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Server error',
+      });
+    }
+  }
+);
+
+
 // @route   DELETE /api/groups/:id
 // @desc    Delete a group
 // @access  Private (only creator/admin can delete)
@@ -395,7 +600,7 @@ router.delete('/:id', async (req, res) => {
 
     // Check if user is the creator
     const isCreator = group.createdBy.toString() === req.user._id.toString();
-    
+
     // Check if user is an admin member
     const isAdmin = group.members.some(
       (m) => m.userId.toString() === req.user._id.toString() && m.role === 'admin'

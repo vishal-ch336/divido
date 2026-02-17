@@ -22,14 +22,14 @@ async function handleResponse<T>(response: Response): Promise<T> {
     }
     throw new ApiError('Invalid response from server', response.status);
   }
-  
+
   if (!response.ok) {
     throw new ApiError(
       data.error || data.message || 'An error occurred',
       response.status
     );
   }
-  
+
   return data.data || data;
 }
 
@@ -54,22 +54,22 @@ async function apiRequest<T>(
   options: RequestInit = {}
 ): Promise<T> {
   const token = getToken();
-  
+
   const headers: HeadersInit = {
     'Content-Type': 'application/json',
     ...options.headers,
   };
-  
+
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
   }
-  
+
   try {
     const response = await fetch(`${API_BASE_URL}${endpoint}`, {
       ...options,
       headers,
     });
-    
+
     return handleResponse<T>(response);
   } catch (error) {
     // Handle network errors (server not reachable, CORS, etc.)
@@ -91,7 +91,13 @@ export const authApi = {
         id: string;
         email: string;
         name: string;
+        phone?: string;
         avatar?: string;
+        notifications?: {
+          email: boolean;
+          push: boolean;
+          reminders: boolean;
+        };
         createdAt: string;
       };
       token: string;
@@ -99,18 +105,24 @@ export const authApi = {
       method: 'POST',
       body: JSON.stringify({ email, password, fullName }),
     });
-    
+
     setToken(response.token);
     return response;
   },
-  
+
   login: async (email: string, password: string) => {
     const response = await apiRequest<{
       user: {
         id: string;
         email: string;
         name: string;
+        phone?: string;
         avatar?: string;
+        notifications?: {
+          email: boolean;
+          push: boolean;
+          reminders: boolean;
+        };
         createdAt: string;
       };
       token: string;
@@ -118,26 +130,113 @@ export const authApi = {
       method: 'POST',
       body: JSON.stringify({ email, password }),
     });
-    
+
     setToken(response.token);
     return response;
   },
-  
-  getMe: async () => {
-    const response = await apiRequest<{
+
+  getCurrentUser: async () => {
+    return await apiRequest<{
       user: {
         id: string;
         email: string;
         name: string;
+        phone?: string;
         avatar?: string;
+        notifications?: {
+          email: boolean;
+          push: boolean;
+          reminders: boolean;
+        };
         createdAt: string;
       };
     }>('/auth/me');
-    return response;
   },
-  
+
+  updateProfile: async (data: { name?: string; phone?: string }) => {
+    return await apiRequest<{
+      user: {
+        id: string;
+        email: string;
+        name: string;
+        phone?: string;
+        avatar?: string;
+        notifications?: {
+          email: boolean;
+          push: boolean;
+          reminders: boolean;
+        };
+        createdAt: string;
+      };
+    }>('/auth/profile', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  },
+
+  changePassword: async (data: { currentPassword: string; newPassword: string }) => {
+    return await apiRequest<{
+      message: string;
+    }>('/auth/password', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  },
+
+  updateNotifications: async (data: { email?: boolean; push?: boolean; reminders?: boolean }) => {
+    return await apiRequest<{
+      notifications: {
+        email: boolean;
+        push: boolean;
+        reminders: boolean;
+      };
+    }>('/auth/notifications', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  },
+
   logout: () => {
     removeToken();
+  },
+};
+
+// Notifications API
+export const notificationsApi = {
+  getAll: async () => {
+    return await apiRequest<{
+      notifications: Array<{
+        _id: string;
+        type: 'expense' | 'settlement' | 'group' | 'reminder';
+        title: string;
+        message: string;
+        read: boolean;
+        createdAt: string;
+        relatedGroup?: { _id: string; name: string };
+        relatedExpense?: { _id: string; description: string; amount: number };
+      }>;
+      unreadCount: number;
+    }>('/notifications');
+  },
+
+  markAllAsRead: async () => {
+    return await apiRequest<{
+      message: string;
+      modifiedCount: number;
+    }>('/notifications/mark-all-read', {
+      method: 'PUT',
+    });
+  },
+
+  markAsRead: async (id: string) => {
+    return await apiRequest<{
+      notification: {
+        _id: string;
+        read: boolean;
+      };
+    }>(`/notifications/${id}/read`, {
+      method: 'PUT',
+    });
   },
 };
 
@@ -146,21 +245,28 @@ export const groupsApi = {
   getAll: async () => {
     return apiRequest<any[]>('/groups');
   },
-  
+
   getById: async (id: string) => {
     return apiRequest<any>(`/groups/${id}`);
   },
-  
+
   create: async (data: { name: string; description?: string; currency?: string; memberEmails?: string[] }) => {
     return apiRequest<any>('/groups', {
       method: 'POST',
       body: JSON.stringify(data),
     });
   },
-  
+
   delete: async (id: string) => {
     return apiRequest<any>(`/groups/${id}`, {
       method: 'DELETE',
+    });
+  },
+
+  addMembers: async (id: string, memberEmails: string[]) => {
+    return apiRequest<any>(`/groups/${id}/members`, {
+      method: 'POST',
+      body: JSON.stringify({ memberEmails }),
     });
   },
 };
@@ -171,7 +277,7 @@ export const expensesApi = {
     const query = groupId ? `?groupId=${groupId}` : '';
     return apiRequest<any[]>(`/expenses${query}`);
   },
-  
+
   create: async (data: {
     groupId: string;
     description: string;
@@ -216,11 +322,11 @@ export const settlementsApi = {
     const query = params.toString() ? `?${params.toString()}` : '';
     return apiRequest<any[]>(`/settlements${query}`);
   },
-  
+
   calculate: async (groupId: string) => {
     return apiRequest<any[]>(`/settlements/calculate?groupId=${groupId}`);
   },
-  
+
   create: async (data: {
     groupId: string;
     fromUser: string;
@@ -234,7 +340,7 @@ export const settlementsApi = {
       body: JSON.stringify(data),
     });
   },
-  
+
   confirm: async (id: string) => {
     return apiRequest<any>(`/settlements/${id}/confirm`, {
       method: 'PATCH',
