@@ -19,9 +19,6 @@ connectDB();
 
 const app = express();
 
-// Middleware
-const cors = require('cors');
-
 const allowedOrigin = process.env.FRONTEND_URL;
 
 app.use(
