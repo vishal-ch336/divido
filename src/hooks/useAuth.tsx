@@ -20,8 +20,11 @@ interface AuthContextType {
   user: User | null;
   session: { token: string } | null;
   loading: boolean;
-  signUp: (email: string, password: string, fullName: string) => Promise<{ error: Error | null }>;
-  signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
+  signUp: (email: string, password: string, fullName: string) => Promise<{ error: Error | null; needsVerification?: boolean }>;
+  signIn: (email: string, password: string) => Promise<{ error: Error | null; needsVerification?: boolean }>;
+  verifyEmail: (email: string, otp: string) => Promise<{ error: Error | null }>;
+  resendOtp: (email: string) => Promise<{ error: Error | null }>;
+  googleSignIn: (credential: string) => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
   logout: () => void;
 }
@@ -57,10 +60,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const signUp = async (email: string, password: string, fullName: string) => {
     try {
-      const response = await authApi.signup(email, password, fullName);
-      setUser(response.user);
-      setSession({ token: response.token });
-      return { error: null };
+      // Signup now just sends OTP — no token returned yet
+      await authApi.signup(email, password, fullName);
+      return { error: null, needsVerification: true };
     } catch (error) {
       const apiError = error instanceof ApiError
         ? new Error(error.message)
@@ -76,9 +78,52 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setSession({ token: response.token });
       return { error: null };
     } catch (error) {
+      if (error instanceof ApiError && error.status === 403) {
+        return { error: new Error(error.message), needsVerification: true };
+      }
       const apiError = error instanceof ApiError
         ? new Error(error.message)
         : new Error('Login failed. Please try again.');
+      return { error: apiError };
+    }
+  };
+
+  const verifyEmail = async (email: string, otp: string) => {
+    try {
+      const response = await authApi.verifyEmail(email, otp);
+      setUser(response.user);
+      setSession({ token: response.token });
+      return { error: null };
+    } catch (error) {
+      const apiError = error instanceof ApiError
+        ? new Error(error.message)
+        : new Error('Verification failed. Please try again.');
+      return { error: apiError };
+    }
+  };
+
+  const resendOtp = async (email: string) => {
+    try {
+      await authApi.resendOtp(email);
+      return { error: null };
+    } catch (error) {
+      const apiError = error instanceof ApiError
+        ? new Error(error.message)
+        : new Error('Failed to resend OTP.');
+      return { error: apiError };
+    }
+  };
+
+  const googleSignIn = async (credential: string) => {
+    try {
+      const response = await authApi.googleAuth(credential);
+      setUser(response.user);
+      setSession({ token: response.token });
+      return { error: null };
+    } catch (error) {
+      const apiError = error instanceof ApiError
+        ? new Error(error.message)
+        : new Error('Google sign-in failed. Please try again.');
       return { error: apiError };
     }
   };
@@ -96,7 +141,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   return (
-    <AuthContext.Provider value={{ user, session, loading, signUp, signIn, signOut, logout }}>
+    <AuthContext.Provider value={{ user, session, loading, signUp, signIn, verifyEmail, resendOtp, googleSignIn, signOut, logout }}>
       {children}
     </AuthContext.Provider>
   );

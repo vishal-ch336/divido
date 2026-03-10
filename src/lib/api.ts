@@ -86,6 +86,15 @@ async function apiRequest<T>(
 // Auth API
 export const authApi = {
   signup: async (email: string, password: string, fullName: string) => {
+    // Backend now returns a message, not a token. OTP is sent via email.
+    const response = await apiRequest<{ message: string }>('/auth/signup', {
+      method: 'POST',
+      body: JSON.stringify({ email, password, fullName }),
+    });
+    return response;
+  },
+
+  verifyEmail: async (email: string, otp: string) => {
     const response = await apiRequest<{
       user: {
         id: string;
@@ -93,19 +102,43 @@ export const authApi = {
         name: string;
         phone?: string;
         avatar?: string;
-        notifications?: {
-          email: boolean;
-          push: boolean;
-          reminders: boolean;
-        };
+        notifications?: { email: boolean; push: boolean; reminders: boolean };
         createdAt: string;
+        isVerified: boolean;
       };
       token: string;
-    }>('/auth/signup', {
+    }>('/auth/verify-email', {
       method: 'POST',
-      body: JSON.stringify({ email, password, fullName }),
+      body: JSON.stringify({ email, otp }),
     });
+    setToken(response.token);
+    return response;
+  },
 
+  resendOtp: async (email: string) => {
+    return await apiRequest<{ message: string }>('/auth/resend-otp', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    });
+  },
+
+  googleAuth: async (credential: string) => {
+    const response = await apiRequest<{
+      user: {
+        id: string;
+        email: string;
+        name: string;
+        phone?: string;
+        avatar?: string;
+        notifications?: { email: boolean; push: boolean; reminders: boolean };
+        createdAt: string;
+        isVerified: boolean;
+      };
+      token: string;
+    }>('/auth/google', {
+      method: 'POST',
+      body: JSON.stringify({ credential }),
+    });
     setToken(response.token);
     return response;
   },
