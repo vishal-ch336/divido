@@ -85,9 +85,16 @@ const Auth = () => {
 
   useEffect(() => {
     if (!authLoading && user) {
-      navigate('/', { replace: true });
+      // If the user came from an invite link, send them back there to auto-join
+      const pendingInvite = sessionStorage.getItem('divido_pending_invite');
+      if (pendingInvite) {
+        navigate(`/join/${pendingInvite}`, { replace: true });
+      } else {
+        navigate('/', { replace: true });
+      }
     }
   }, [user, authLoading, navigate]);
+
 
   // Resend countdown timer
   useEffect(() => {

@@ -10,6 +10,7 @@ import activityRoutes from './routes/activity.js';
 import dashboardRoutes from './routes/dashboard.js';
 import settlementRoutes from './routes/settlements.js';
 import notificationRoutes from './routes/notifications.js';
+import inviteRoutes from './routes/invites.js';
 
 // Load environment variables
 dotenv.config();
@@ -55,6 +56,7 @@ app.use('/api/activity', activityRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/settlements', settlementRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api', inviteRoutes);
 
 // Health check (works even if DB is not connected)
 app.get('/api/health', (req, res) => {

@@ -404,5 +404,46 @@ export const dashboardApi = {
   },
 };
 
-export { getToken, setToken, removeToken, ApiError };
 
+// Invites API
+export const invitesApi = {
+  generate: async (
+    groupId: string,
+    options?: { expiresInDays?: number; maxUses?: number }
+  ) => {
+    return apiRequest<{
+      inviteCode: string;
+      inviteUrl: string;
+      expiresAt?: string;
+      maxUses?: number;
+    }>(`/groups/${groupId}/invite`, {
+      method: 'POST',
+      body: JSON.stringify(options || {}),
+    });
+  },
+
+  getInfo: async (inviteCode: string) => {
+    return apiRequest<{
+      inviteCode: string;
+      groupId: string;
+      groupName: string;
+      memberCount: number;
+      currency: string;
+      createdBy: { name: string; avatar?: string };
+      expiresAt?: string;
+      maxUses?: number;
+      usesCount: number;
+    }>(`/invites/${inviteCode}`);
+  },
+
+  join: async (inviteCode: string) => {
+    return apiRequest<{
+      groupId: string;
+      groupName: string;
+    }>(`/invites/${inviteCode}/join`, {
+      method: 'POST',
+    });
+  },
+};
+
+export { getToken, setToken, removeToken, ApiError };

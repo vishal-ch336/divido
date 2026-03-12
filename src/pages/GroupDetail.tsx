@@ -6,12 +6,13 @@ import { DebtSummary } from '@/components/dashboard/DebtSummary';
 import { ExpenseItem } from '@/components/dashboard/ExpenseItem';
 import { AddExpenseDialog } from '@/components/expenses/AddExpenseDialog';
 import { AddMembersDialog } from '@/components/groups/AddMembersDialog';
+import { InviteDialog } from '@/components/groups/InviteDialog';
 import { groupsApi, expensesApi, activityApi } from '@/lib/api';
 import { useAuth } from '@/hooks/useAuth';
 import { useToast } from '@/hooks/use-toast';
 import { ApiError } from '@/lib/api';
 import { formatCurrency } from '@/lib/format';
-import { ArrowLeft, Users, Receipt, Loader2, Trash2, MoreVertical, UserPlus } from 'lucide-react';
+import { ArrowLeft, Users, Receipt, Loader2, Trash2, MoreVertical, UserPlus, Link2 } from 'lucide-react';
 import { DebtRelation, Expense, ActivityLog } from '@/types';
 import {
   DropdownMenu,
@@ -236,6 +237,12 @@ const GroupDetail = () => {
     ? (group.createdBy.id || group.createdBy._id) === user?.id
     : group?.createdBy === user?.id;
 
+  const isAdminMember = group?.members?.some(
+    (m: any) => (m.userId?._id || m.userId?.id || m.userId) === user?.id && m.role === 'admin'
+  );
+
+  const isAdmin = isCreator || isAdminMember;
+
   if (loading) {
     return (
       <MainLayout>
@@ -285,7 +292,18 @@ const GroupDetail = () => {
           </div>
           <div className="flex items-center gap-2">
             <AddExpenseDialog groupId={group.id} onExpenseAdded={handleExpenseAdded} />
-            {isCreator && (
+            {/* Invite via Link — available to ALL group members */}
+            <InviteDialog
+              groupId={group.id}
+              groupName={group.name}
+              trigger={
+                <Button variant="outline" size="sm" className="gap-2">
+                  <Link2 className="h-4 w-4" />
+                  Invite
+                </Button>
+              }
+            />
+            {isAdmin && (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button variant="ghost" size="icon">
@@ -300,7 +318,7 @@ const GroupDetail = () => {
                     trigger={
                       <DropdownMenuItem onSelect={(e) => e.preventDefault()}>
                         <UserPlus className="mr-2 h-4 w-4" />
-                        Add Members
+                        Add Members by Email
                       </DropdownMenuItem>
                     }
                   />

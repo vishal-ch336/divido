@@ -7,13 +7,12 @@ import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { AddMembersDialog } from '@/components/groups/AddMembersDialog';
-import { groupsApi } from '@/lib/api';
+import { groupsApi, invitesApi } from '@/lib/api';
 import { useAuth } from '@/hooks/useAuth';
 import { useToast } from '@/hooks/use-toast';
 import { ApiError } from '@/lib/api';
 import { formatCurrency } from '@/lib/format';
-import { Plus, Search, Users, Loader2, X, User, Trash2, MoreVertical, Receipt, UserPlus } from 'lucide-react';
+import { Plus, Search, Users, Loader2, Trash2, MoreVertical, Receipt, Link2, Copy, CheckCheck } from 'lucide-react';
 import { Group } from '@/types';
 import {
   DropdownMenu,
@@ -39,14 +38,18 @@ const Groups = () => {
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [newGroupName, setNewGroupName] = useState('');
   const [newGroupDescription, setNewGroupDescription] = useState('');
-  const [memberEmail, setMemberEmail] = useState('');
-  const [memberEmails, setMemberEmails] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadingGroups, setLoadingGroups] = useState(true);
   const [groups, setGroups] = useState<Group[]>([]);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [groupToDelete, setGroupToDelete] = useState<Group | null>(null);
   const [deleting, setDeleting] = useState(false);
+  // Invite link state (shown after group is created)
+  const [createdGroupId, setCreatedGroupId] = useState<string | null>(null);
+  const [inviteUrl, setInviteUrl] = useState<string | null>(null);
+  const [inviteCopied, setInviteCopied] = useState(false);
+  const [generatingInvite, setGeneratingInvite] = useState(false);
+  const isInviteStep = !!createdGroupId;
 
   // Fetch groups on mount
   useEffect(() => {
@@ -92,98 +95,19 @@ const Groups = () => {
     }
   };
 
-  const validateEmail = (email: string): boolean => {
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    return emailRegex.test(email.trim());
-  };
-
-  const handleAddMember = () => {
-    const email = memberEmail.trim().toLowerCase();
-
-    if (!email) {
-      toast({
-        title: 'Validation Error',
-        description: 'Please enter an email address',
-        variant: 'destructive',
-      });
-      return;
-    }
-
-    if (!validateEmail(email)) {
-      toast({
-        title: 'Validation Error',
-        description: 'Please enter a valid email address',
-        variant: 'destructive',
-      });
-      return;
-    }
-
-    if (user && email === user.email.toLowerCase()) {
-      toast({
-        title: 'Validation Error',
-        description: 'You cannot add yourself as a member',
-        variant: 'destructive',
-      });
-      return;
-    }
-
-    // Check for duplicates (case-insensitive)
-    if (memberEmails.some(e => e.toLowerCase() === email)) {
-      toast({
-        title: 'Validation Error',
-        description: 'This email is already added',
-        variant: 'destructive',
-      });
-      return;
-    }
-
-    setMemberEmails([...memberEmails, email]);
-    setMemberEmail('');
-  };
-
-  const handleRemoveMember = (email: string) => {
-    setMemberEmails(memberEmails.filter(e => e !== email));
-  };
-
   const handleCreateGroup = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    // Validation
     if (!newGroupName.trim()) {
-      toast({
-        title: 'Validation Error',
-        description: 'Please enter a group name',
-        variant: 'destructive',
-      });
+      toast({ title: 'Validation Error', description: 'Please enter a group name', variant: 'destructive' });
       return;
     }
-
     if (newGroupName.trim().length > 100) {
-      toast({
-        title: 'Validation Error',
-        description: 'Group name must be less than 100 characters',
-        variant: 'destructive',
-      });
+      toast({ title: 'Validation Error', description: 'Group name must be less than 100 characters', variant: 'destructive' });
       return;
     }
-
     if (newGroupDescription && newGroupDescription.length > 500) {
-      toast({
-        title: 'Validation Error',
-        description: 'Description must be less than 500 characters',
-        variant: 'destructive',
-      });
-      return;
-    }
-
-    // Validate member emails
-    const invalidEmails = memberEmails.filter(email => !validateEmail(email));
-    if (invalidEmails.length > 0) {
-      toast({
-        title: 'Validation Error',
-        description: `Invalid emails: ${invalidEmails.join(', ')}`,
-        variant: 'destructive',
-      });
+      toast({ title: 'Validation Error', description: 'Description must be less than 500 characters', variant: 'destructive' });
       return;
     }
 
@@ -193,23 +117,25 @@ const Groups = () => {
         name: newGroupName.trim(),
         description: newGroupDescription.trim() || undefined,
         currency: 'INR',
-        memberEmails: memberEmails.length > 0 ? memberEmails : undefined,
       });
 
-      const memberCount = memberEmails.length > 0 ? ` with ${memberEmails.length} member${memberEmails.length === 1 ? '' : 's'}` : '';
-      toast({
-        title: 'Success!',
-        description: `Group "${newGroup.name}" created successfully${memberCount}`,
-      });
+      toast({ title: 'Group created!', description: `"${newGroup.name}" is ready. Share the invite link to add members.` });
 
-      // Reset form
-      setNewGroupName('');
-      setNewGroupDescription('');
-      setMemberEmail('');
-      setMemberEmails([]);
-      setIsCreateOpen(false);
+      // Move to invite step
+      const gid = newGroup._id || newGroup.id;
+      setCreatedGroupId(gid);
 
-      // Refresh groups list
+      // Auto-generate the invite link
+      setGeneratingInvite(true);
+      try {
+        const inviteData = await invitesApi.generate(gid);
+        setInviteUrl(inviteData.inviteUrl);
+      } catch {
+        // Non-fatal — user can copy manually later
+      } finally {
+        setGeneratingInvite(false);
+      }
+
       await fetchGroups();
     } catch (error) {
       console.error('Error creating group:', error);
@@ -223,15 +149,28 @@ const Groups = () => {
     }
   };
 
+  const handleCopyInvite = async () => {
+    if (!inviteUrl) return;
+    try {
+      await navigator.clipboard.writeText(inviteUrl);
+      setInviteCopied(true);
+      toast({ title: 'Copied!', description: 'Invite link copied to clipboard' });
+      setTimeout(() => setInviteCopied(false), 2500);
+    } catch {
+      toast({ title: 'Error', description: 'Could not copy to clipboard', variant: 'destructive' });
+    }
+  };
+
   const handleOpenChange = (isOpen: boolean) => {
     if (!loading) {
       setIsCreateOpen(isOpen);
       if (!isOpen) {
-        // Reset form when closing
+        // Reset everything when closing
         setNewGroupName('');
         setNewGroupDescription('');
-        setMemberEmail('');
-        setMemberEmails([]);
+        setCreatedGroupId(null);
+        setInviteUrl(null);
+        setInviteCopied(false);
       }
     }
   };
@@ -289,125 +228,116 @@ const Groups = () => {
             </DialogTrigger>
             <DialogContent>
               <DialogHeader>
-                <DialogTitle>Create New Group</DialogTitle>
+                <DialogTitle>
+                  {isInviteStep ? 'Invite Members' : 'Create New Group'}
+                </DialogTitle>
               </DialogHeader>
-              <form onSubmit={handleCreateGroup} className="space-y-4 mt-4">
-                <div className="space-y-2">
-                  <Label htmlFor="groupName">Group Name *</Label>
-                  <Input
-                    id="groupName"
-                    placeholder="e.g., Goa Trip 2024"
-                    value={newGroupName}
-                    onChange={(e) => setNewGroupName(e.target.value)}
-                    required
-                    disabled={loading}
-                    maxLength={100}
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    {newGroupName.length}/100 characters
-                  </p>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="groupDescription">Description (Optional)</Label>
-                  <Textarea
-                    id="groupDescription"
-                    placeholder="What's this group for?"
-                    value={newGroupDescription}
-                    onChange={(e) => setNewGroupDescription(e.target.value)}
-                    rows={3}
-                    disabled={loading}
-                    maxLength={500}
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    {newGroupDescription.length}/500 characters
-                  </p>
-                </div>
 
-                {/* Members Section */}
-                <div className="space-y-2">
-                  <Label htmlFor="memberEmail">Add Members (Optional)</Label>
-                  <p className="text-xs text-muted-foreground">
-                    Add members by their email addresses. They must have an account.
-                  </p>
-                  <div className="flex gap-2">
-                    <Input
-                      id="memberEmail"
-                      type="email"
-                      placeholder="Enter member email"
-                      value={memberEmail}
-                      onChange={(e) => setMemberEmail(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          e.preventDefault();
-                          handleAddMember();
-                        }
-                      }}
+              {/* ── Step 1: Group details ── */}
+              {!isInviteStep && (
+                <form onSubmit={handleCreateGroup} className="space-y-4 mt-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="groupName">Group Name *</Label>
+                    <input
+                      id="groupName"
+                      className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                      placeholder="e.g., Goa Trip 2024"
+                      value={newGroupName}
+                      onChange={(e) => setNewGroupName(e.target.value)}
+                      required
                       disabled={loading}
-                      className="flex-1"
+                      maxLength={100}
                     />
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={handleAddMember}
-                      disabled={loading || !memberEmail.trim()}
-                    >
-                      <Plus className="h-4 w-4" />
+                    <p className="text-xs text-muted-foreground">{newGroupName.length}/100 characters</p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="groupDescription">Description (Optional)</Label>
+                    <Textarea
+                      id="groupDescription"
+                      placeholder="What's this group for?"
+                      value={newGroupDescription}
+                      onChange={(e) => setNewGroupDescription(e.target.value)}
+                      rows={3}
+                      disabled={loading}
+                      maxLength={500}
+                    />
+                    <p className="text-xs text-muted-foreground">{newGroupDescription.length}/500 characters</p>
+                  </div>
+                  <div className="flex gap-3 pt-2">
+                    <Button type="button" variant="outline" className="flex-1" onClick={() => handleOpenChange(false)} disabled={loading}>
+                      Cancel
+                    </Button>
+                    <Button type="submit" variant="accent" className="flex-1" disabled={loading || !newGroupName.trim()}>
+                      {loading ? (
+                        <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Creating...</>
+                      ) : (
+                        'Create Group'
+                      )}
                     </Button>
                   </div>
+                </form>
+              )}
 
-                  {/* Member Email Tags */}
-                  {memberEmails.length > 0 && (
-                    <div className="flex flex-wrap gap-2 mt-2 p-3 border rounded-lg bg-muted/30">
-                      {memberEmails.map((email, index) => (
-                        <div
-                          key={index}
-                          className="flex items-center gap-2 px-3 py-1.5 bg-background border rounded-full text-sm"
-                        >
-                          <User className="h-3.5 w-3.5 text-muted-foreground" />
-                          <span className="text-foreground">{email}</span>
-                          <button
-                            type="button"
-                            onClick={() => handleRemoveMember(email)}
-                            disabled={loading}
-                            className="ml-1 hover:bg-muted rounded-full p-0.5 transition-colors"
-                          >
-                            <X className="h-3.5 w-3.5 text-muted-foreground hover:text-destructive" />
-                          </button>
-                        </div>
-                      ))}
+              {/* ── Step 2: Invite link ── */}
+              {isInviteStep && (
+                <div className="space-y-5 mt-2">
+                  <div className="text-center space-y-3 py-2">
+                    <div className="flex h-14 w-14 items-center justify-center rounded-full bg-primary/10 mx-auto">
+                      <Link2 className="h-6 w-6 text-primary" />
                     </div>
-                  )}
-                </div>
+                    <div>
+                      <p className="font-medium text-foreground">Group created! 🎉</p>
+                      <p className="text-sm text-muted-foreground mt-1">
+                        Share this link with anyone you want to invite.
+                      </p>
+                    </div>
+                  </div>
 
-                <div className="flex gap-3 pt-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="flex-1"
-                    onClick={() => handleOpenChange(false)}
-                    disabled={loading}
-                  >
-                    Cancel
-                  </Button>
-                  <Button
-                    type="submit"
-                    variant="accent"
-                    className="flex-1"
-                    disabled={loading || !newGroupName.trim()}
-                  >
-                    {loading ? (
-                      <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Creating...
-                      </>
-                    ) : (
-                      'Create Group'
-                    )}
+                  {generatingInvite ? (
+                    <div className="flex items-center justify-center py-4 gap-2 text-muted-foreground">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <span className="text-sm">Generating invite link…</span>
+                    </div>
+                  ) : inviteUrl ? (
+                    <div className="space-y-3">
+                      <div className="flex gap-2">
+                        <input
+                          readOnly
+                          value={inviteUrl}
+                          className="flex-1 h-9 rounded-md border border-input bg-muted/50 px-3 text-xs font-mono text-muted-foreground cursor-default select-all"
+                          onClick={(e) => (e.target as HTMLInputElement).select()}
+                        />
+                        <Button
+                          onClick={handleCopyInvite}
+                          variant={inviteCopied ? 'default' : 'outline'}
+                          size="sm"
+                          className="gap-1.5 shrink-0 transition-all"
+                        >
+                          {inviteCopied ? (
+                            <><CheckCheck className="h-3.5 w-3.5" />Copied!</>
+                          ) : (
+                            <><Copy className="h-3.5 w-3.5" />Copy</>
+                          )}
+                        </Button>
+                      </div>
+                      <p className="text-xs text-center text-muted-foreground">
+                        Anyone with this link can join the group.
+                      </p>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-center text-muted-foreground">
+                      Could not generate invite link. You can do it from the group page.
+                    </p>
+                  )}
+
+                  <Button className="w-full" onClick={() => handleOpenChange(false)}>
+                    Done
                   </Button>
                 </div>
-              </form>
+              )}
             </DialogContent>
           </Dialog>
+
         </div>
 
         {/* Search */}
@@ -481,17 +411,6 @@ const Groups = () => {
                                   </Button>
                                 </DropdownMenuTrigger>
                                 <DropdownMenuContent align="end">
-                                  <AddMembersDialog
-                                    groupId={group.id}
-                                    groupName={group.name}
-                                    onMembersAdded={fetchGroups}
-                                    trigger={
-                                      <DropdownMenuItem onSelect={(e) => e.preventDefault()}>
-                                        <UserPlus className="mr-2 h-4 w-4" />
-                                        Add Members
-                                      </DropdownMenuItem>
-                                    }
-                                  />
                                   <DropdownMenuItem
                                     className="text-destructive focus:text-destructive"
                                     onClick={(e) => {
@@ -547,7 +466,7 @@ const Groups = () => {
                                   }`}
                               >
                                 <div className="flex items-center gap-3">
-                                  <User className="h-4 w-4 text-muted-foreground" />
+                                  <Users className="h-4 w-4 text-muted-foreground" />
                                   <span className="text-sm text-foreground">
                                     {isYouOwe ? 'You owe' : 'Owes you'}: <strong>{otherUser.name}</strong>
                                   </span>
