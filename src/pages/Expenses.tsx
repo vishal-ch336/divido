@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { MainLayout } from '@/components/layout/MainLayout';
-import { ExpenseItem } from '@/components/dashboard/ExpenseItem';
+import { ExpenseCard } from '@/components/expenses/ExpenseCard';
 import { AddExpenseDialog } from '@/components/expenses/AddExpenseDialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -227,18 +227,15 @@ const Expenses = () => {
             </div>
           ) : filteredExpenses.length > 0 ? (
             <div className="divide-y divide-border">
-              {filteredExpenses.map((expense, index) => {
-                // Transform expense to match ExpenseItem's expected type
-                const expenseForItem = {
-                  ...expense,
-                  groupId: typeof expense.groupId === 'string' 
-                    ? expense.groupId 
-                    : (expense.groupId.id || expense.groupId._id || ''),
-                };
+              {filteredExpenses.map((expense) => {
+                const resolvedGroupId = typeof expense.groupId === 'string' 
+                  ? expense.groupId 
+                  : (expense.groupId.id || expense.groupId._id || '');
                 return (
                   <div key={expense.id} className="p-2">
-                    <ExpenseItem
-                      expense={expenseForItem as any}
+                    <ExpenseCard
+                      expense={expense as any}
+                      groupId={resolvedGroupId}
                       showGroup
                       className={`animate-slide-up border-0 shadow-none hover:shadow-none`}
                     />

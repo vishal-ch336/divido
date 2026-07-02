@@ -36,8 +36,6 @@ const groupInviteSchema = new mongoose.Schema(
   }
 );
 
-// Index to speed up invite look-ups by code
-groupInviteSchema.index({ inviteCode: 1 });
 
 // Helper: check if invite is still valid
 groupInviteSchema.methods.isValid = function () {

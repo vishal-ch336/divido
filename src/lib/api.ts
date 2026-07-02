@@ -336,6 +336,33 @@ export const expensesApi = {
       body: JSON.stringify(data),
     });
   },
+
+  update: async (id: string, data: Partial<{
+    description: string;
+    amount: number;
+    category: string;
+    splitType: 'equal' | 'percentage' | 'share';
+    splits: Array<{
+      userId: string;
+      amount: number;
+      percentage?: number;
+      shares?: number;
+      isPaid?: boolean;
+    }>;
+    date: string;
+    paymentMethod: 'cash' | 'upi' | 'card';
+  }>) => {
+    return apiRequest<any>(`/expenses/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  },
+
+  delete: async (id: string) => {
+    return apiRequest<{ success: true }>(`/expenses/${id}`, {
+      method: 'DELETE',
+    });
+  },
 };
 
 // Activity API

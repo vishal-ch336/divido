@@ -4,6 +4,7 @@ import { protect } from '../middleware/auth.js';
 import Expense from '../models/Expense.js';
 import Group from '../models/Group.js';
 import ActivityLog from '../models/ActivityLog.js';
+import { applyExpense, reverseExpense } from '../utils/balanceCalculator.js';
 
 const router = express.Router();
 
@@ -194,5 +195,147 @@ router.post(
   }
 );
 
-export default router;
+// @route   PUT /api/expenses/:id
+// @desc    Update an expense and recalculate balances
+// @access  Private
+router.put('/:id', async (req, res) => {
+  try {
+    const expense = await Expense.findById(req.params.id);
+    if (!expense) {
+      return res.status(404).json({
+        success: false,
+        error: 'Expense not found',
+      });
+    }
 
+    // Verify user is a member of the expense's group
+    const group = await Group.findById(expense.groupId);
+    if (!group) {
+      return res.status(404).json({
+        success: false,
+        error: 'Group not found',
+      });
+    }
+
+    const isMember = group.members.some(
+      (m) => !m.isGuest && m.userId && m.userId.toString() === req.user._id.toString()
+    ) || group.createdBy.toString() === req.user._id.toString();
+
+    if (!isMember) {
+      return res.status(403).json({
+        success: false,
+        error: 'Not authorized to edit expenses in this group',
+      });
+    }
+
+    // Capture old values for the activity log
+    const oldDescription = expense.description;
+    const oldAmount = expense.amount;
+
+    // Reverse the old expense balances
+    reverseExpense(group, expense);
+
+    // Update expense fields
+    const { description, amount, category, splitType, splits, date, paymentMethod } = req.body;
+    if (description !== undefined) expense.description = description;
+    if (amount !== undefined) expense.amount = amount;
+    if (category !== undefined) expense.category = category;
+    if (splitType !== undefined) expense.splitType = splitType;
+    if (splits !== undefined) expense.splits = splits;
+    if (date !== undefined) expense.date = date;
+    if (paymentMethod !== undefined) expense.paymentMethod = paymentMethod;
+
+    // Apply the updated expense balances
+    applyExpense(group, expense);
+
+    // Save both documents
+    await expense.save();
+    await group.save();
+
+    // Re-populate for the response
+    await expense.populate('paidBy', 'name email avatar');
+    await expense.populate('splits.userId', 'name email avatar');
+    await expense.populate('groupId', 'name');
+
+    // Log activity
+    await ActivityLog.create({
+      groupId: expense.groupId._id || expense.groupId,
+      userId: req.user._id,
+      action: 'expense_edited',
+      description: `${req.user.name} edited expense: ${oldDescription} ₹${oldAmount} → ₹${expense.amount}`,
+      metadata: { expenseId: expense._id },
+    });
+
+    res.json({
+      success: true,
+      data: expense,
+    });
+  } catch (error) {
+    console.error('Update expense error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Server error',
+    });
+  }
+});
+
+// @route   DELETE /api/expenses/:id
+// @desc    Delete an expense and reverse its balances
+// @access  Private
+router.delete('/:id', async (req, res) => {
+  try {
+    const expense = await Expense.findById(req.params.id);
+    if (!expense) {
+      return res.status(404).json({
+        success: false,
+        error: 'Expense not found',
+      });
+    }
+
+    const group = await Group.findById(expense.groupId);
+    if (!group) {
+      return res.status(404).json({
+        success: false,
+        error: 'Group not found',
+      });
+    }
+
+    // Only the payer or the group creator can delete
+    const isPayer = expense.paidBy.toString() === req.user._id.toString();
+    const isCreator = group.createdBy.toString() === req.user._id.toString();
+
+    if (!isPayer && !isCreator) {
+      return res.status(403).json({
+        success: false,
+        error: 'Not authorized to delete this expense',
+      });
+    }
+
+    // Reverse the expense balances
+    reverseExpense(group, expense);
+    await group.save();
+
+    // Log activity before deleting
+    await ActivityLog.create({
+      groupId: expense.groupId,
+      userId: req.user._id,
+      action: 'expense_deleted',
+      description: `${req.user.name} deleted expense: ${expense.description} ₹${expense.amount}`,
+      metadata: { expenseId: expense._id },
+    });
+
+    await expense.deleteOne();
+
+    res.json({
+      success: true,
+    });
+  } catch (error) {
+    console.error('Delete expense error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Server error',
+    });
+  }
+});
+
+export default router;
